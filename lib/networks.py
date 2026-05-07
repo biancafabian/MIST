@@ -11,7 +11,6 @@ import logging
 
 from scipy import ndimage
 
-from .decoders import CASCADE_Add, CASCADE_Cat
 #from .new_decoder import FCT, FCT1, FCT2
 from .MIST import CAM
 from .maxxvit_4out import maxvit_tiny_rw_224 as maxvit_tiny_rw_224_4out
@@ -63,15 +62,6 @@ class MIST_CAM(nn.Module):
             self.channels = [512, 256, 128, 64]
         elif (self.model_scale == 'small'):
             self.channels = [768, 384, 192, 96]
-
-        # shared decoder initialization
-        if (self.decoder_aggregation == 'additive'):
-            self.decoder = CASCADE_Add(channels=self.channels)
-        elif (self.decoder_aggregation == 'concatenation'):
-            self.decoder = CASCADE_Cat(channels=self.channels)
-        else:
-            sys.exit(
-                "'" + self.decoder_aggregation + "' is not a valid decoder aggregation! Currently supported aggregations are 'additive' and 'concatenation'.")
 
         # Prediction heads initialization
         self.decoder=CAM("SSS")
