@@ -25,14 +25,17 @@ def np2th(weights, conv=False):
     return torch.from_numpy(weights)
 
 def load_pretrained_weights(img_size, model_scale):
-
     backbone = maxxvit_rmlp_small_rw_256_4out()
-    print('Loading:', './pretrained_pth/maxvit/maxxvit_rmlp_small_rw_256_sw-37e217ff.pth')
-    state_dict = torch.load('./pretrained_pth/maxvit/maxxvit_rmlp_small_rw_256_sw-37e217ff.pth')
-    #state_dict = torch.load('./pretrained_pth/maxvit/trained_backbone.pth')
+    weights_path = './pretrained_pth/maxvit/maxxvit_rmlp_small_rw_256_sw-37e217ff.pth'
+    if not os.path.exists(weights_path):
+        os.makedirs(os.path.dirname(weights_path), exist_ok=True)
+        url = 'https://github.com/rwightman/pytorch-image-models/releases/download/v0.1-weights-maxx/maxxvit_rmlp_small_rw_256_sw-37e217ff.pth'
+        print('Downloading pretrained weights from', url)
+        torch.hub.download_url_to_file(url, weights_path)
+    print('Loading:', weights_path)
+    state_dict = torch.load(weights_path, map_location='cpu', weights_only=False)
     backbone.load_state_dict(state_dict, strict=False)
     print('Pretrained weights loaded.')
-    
     return backbone
 
 class MIST_CAM(nn.Module):

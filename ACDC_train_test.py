@@ -46,25 +46,24 @@ os.environ['CUDA_VISIBLE_DEVICES']='0, 1'
 parser = argparse.ArgumentParser(description='Searching longest common substring. '
                     'Uses Ukkonen\'s suffix tree algorithm and generalized suffix tree. '
                     'Written by Ilya Stepanov (c) 2013')
-parser.add_argument('strings', metavar='STRING', nargs='*', help='String for searching',)
-parser.add_argument("--batch_size", default=12, help="batch size") #12
-parser.add_argument("--lr", default=0.0001, help="learning rate")
-parser.add_argument("--max_epochs", default=400)
-parser.add_argument("--img_size", default=256)
+parser.add_argument("--batch_size", type=int, default=12, help="batch size")
+parser.add_argument("--lr", type=float, default=0.0001, help="learning rate")
+parser.add_argument("--max_epochs", type=int, default=400)
+parser.add_argument("--img_size", type=int, default=256)
 parser.add_argument("--save_path", default="./model_pth/data")
-parser.add_argument("--n_gpu", default=1)
+parser.add_argument("--n_gpu", type=int, default=1)
 parser.add_argument("--checkpoint", default=None)
 parser.add_argument("--list_dir", default="./data/ACDC/lists_ACDC")
 parser.add_argument("--root_dir", default="./data/ACDC/")
 parser.add_argument("--volume_path", default="./data/ACDC/test")
-parser.add_argument("--z_spacing", default=10)
-parser.add_argument("--num_classes", default=4)
+parser.add_argument("--z_spacing", type=int, default=10)
+parser.add_argument("--num_classes", type=int, default=4)
 parser.add_argument('--test_save_dir', default='./predictions', help='saving prediction as nii!')
-parser.add_argument('--deterministic', type=int,  default=1,
+parser.add_argument('--deterministic', type=int, default=1,
                     help='whether use deterministic training')
 parser.add_argument('--seed', type=int,
-                    default=2222, help='random seed')            
-args = parser.parse_args("AAA".split())
+                    default=2222, help='random seed')
+args = parser.parse_args()
 
 
 # In[4]:
@@ -111,7 +110,7 @@ if not os.path.exists(test_save_path):
 net = MIST_CAM(n_class=args.num_classes, img_size_s1=(args.img_size,args.img_size), img_size_s2=(224,224), model_scale='small', decoder_aggregation='additive', interpolation='bilinear').cuda()
 
 if args.checkpoint:
-    net.load_state_dict(torch.load(args.checkpoint))
+    net.load_state_dict(torch.load(args.checkpoint, map_location='cpu', weights_only=False))
 
 train_dataset = ACDCdataset(args.root_dir, args.list_dir, split="train", transform=
                                    transforms.Compose(
@@ -351,7 +350,7 @@ if __name__ == "__main__":
     print(snapshot)
     print(os.path.exists(snapshot))
     if not os.path.exists(snapshot): snapshot = snapshot.replace('last', 'epoch_'+str(args.max_epochs-1))
-    net.load_state_dict(torch.load(snapshot))
+    net.load_state_dict(torch.load(snapshot, map_location='cpu', weights_only=False))
     snapshot_name = snapshot_path.split('/')[-1]
 
     log_folder = 'test_log/test_log_' + args.exp
