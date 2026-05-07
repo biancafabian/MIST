@@ -294,7 +294,6 @@ def inference(args, model, testloader, test_save_path=None):
     metric_list = 0.0
     with torch.no_grad():
         for i_batch, sampled_batch in tqdm(enumerate(testloader)):
-            h, w = sampled_batch["image"].size()[2:]
             image, label, case_name = sampled_batch["image"], sampled_batch["label"], sampled_batch['case_name'][0]
             metric_i = test_single_volume(image, label, model, classes=args.num_classes, patch_size=[args.img_size, args.img_size],
                                           test_save_path=test_save_path, case=case_name, z_spacing=args.z_spacing)
