@@ -375,5 +375,4 @@ if __name__ == "__main__":
 # In[ ]:
 
 
-img=cv2.imread()
 
