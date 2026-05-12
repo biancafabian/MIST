@@ -212,6 +212,7 @@ def test_single_volume(image, label, net, classes, patch_size=[256, 256], test_s
                     preds_o.append(pred==i)
                 prediction[ind] = pred
     else:
+        x, y = image.shape[0], image.shape[1]
         input = torch.from_numpy(image).unsqueeze(
             0).unsqueeze(0).float().cuda()
         net.eval()
@@ -222,8 +223,10 @@ def test_single_volume(image, label, net, classes, patch_size=[256, 256], test_s
                 outputs += P[idx]
             out = torch.argmax(torch.softmax(outputs, dim=1), dim=1).squeeze(0)
             prediction = out.cpu().detach().numpy()
+            if x != patch_size[0] or y != patch_size[1]:
+                prediction = zoom(prediction, (x / patch_size[0], y / patch_size[1]), order=0)
     metric_list = []
-    
+
     for i in range(1, classes):
         metric_list.append(calculate_metric_percase(prediction == i, label == i))
     return metric_list
