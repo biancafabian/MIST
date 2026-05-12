@@ -146,12 +146,11 @@ class DiceLoss(nn.Module):
 def calculate_metric_percase(pred, gt):
     pred[pred > 0] = 1
     gt[gt > 0] = 1
-    print(pred.shape, gt.shape)
     if pred.sum() > 0 and gt.sum()>0:
         dice = metric.binary.dc(pred, gt)
-        hd95 = metric.binary.hd95(pred, gt.squeeze(0))
+        hd95 = metric.binary.hd95(pred, gt)
         jaccard = metric.binary.jc(pred, gt)
-        asd = metric.binary.assd(pred, gt.squeeze(0))
+        asd = metric.binary.assd(pred, gt)
         return dice, hd95, jaccard, asd
     elif pred.sum() > 0 and gt.sum()==0:
         return 1, 0, 1, 0
