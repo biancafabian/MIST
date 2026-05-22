@@ -12,7 +12,7 @@ import logging
 from scipy import ndimage
 
 #from .new_decoder import FCT, FCT1, FCT2
-from .MIST import CAM
+from .MIST import CAM, CAM_Mamba
 from .maxxvit_4out import maxvit_tiny_rw_224 as maxvit_tiny_rw_224_4out
 from .maxxvit_4out import maxvit_rmlp_tiny_rw_256 as maxvit_rmlp_tiny_rw_256_4out
 from .maxxvit_4out import maxxvit_rmlp_small_rw_256 as maxxvit_rmlp_small_rw_256_4out
@@ -103,7 +103,69 @@ class MIST_CAM(nn.Module):
         # print([p1.shape, p2.shape, p3.shape, p4.shape])
         return p11, p12, p13, p14
 
-        
+
+
+class MIST_CAM_Mamba(nn.Module):
+    """MIST with the CAM decoder's attention blocks replaced by Mamba SS2D.
+    Encoder (MaxViT) and all training infrastructure remain identical to MIST_CAM.
+    Only decoder blocks 6-9 change: Attention → MambaSSM with 4-direction cross-scan.
+    """
+
+    def __init__(self, n_class=1, img_size_s1=(256, 256), img_size_s2=(224, 224),
+                 model_scale='small', decoder_aggregation='additive', interpolation='bilinear'):
+        super(MIST_CAM_Mamba, self).__init__()
+
+        self.n_class = n_class
+        self.img_size_s1 = img_size_s1
+        self.img_size_s2 = img_size_s2
+        self.model_scale = model_scale
+        self.decoder_aggregation = decoder_aggregation
+        self.interpolation = interpolation
+
+        # conv block to convert single channel to 3 channels
+        self.conv = nn.Sequential(
+            nn.Conv2d(1, 3, kernel_size=1),
+            nn.BatchNorm2d(3),
+            nn.ReLU(inplace=True)
+        )
+
+        # same pretrained MaxViT encoder as MIST_CAM
+        self.backbone1 = load_pretrained_weights(self.img_size_s1[0], self.model_scale)
+
+        if self.model_scale == 'tiny':
+            self.channels = [512, 256, 128, 64]
+        elif self.model_scale == 'small':
+            self.channels = [768, 384, 192, 96]
+
+        # Mamba-based decoder
+        self.decoder = CAM_Mamba("SSS")
+
+        self.out_head1 = nn.Conv2d(self.channels[0], self.n_class, 1)
+        self.out_head2 = nn.Conv2d(self.channels[1], self.n_class, 1)
+        self.out_head3 = nn.Conv2d(self.channels[2], self.n_class, 1)
+        self.out_head4 = nn.Conv2d(self.channels[3], self.n_class, 1)
+
+    def forward(self, x):
+        if x.size()[1] == 1:
+            x = self.conv(x)
+
+        f1 = self.backbone1(F.interpolate(x, size=self.img_size_s1, mode=self.interpolation))
+
+        x11_o, x12_o, x13_o, x14_o = self.decoder(f1[0], f1[1], f1[2], f1[3])
+
+        p11 = self.out_head1(x11_o)
+        p12 = self.out_head2(x12_o)
+        p13 = self.out_head3(x13_o)
+        p14 = self.out_head4(x14_o)
+
+        p11 = F.interpolate(p11, scale_factor=32, mode=self.interpolation)
+        p12 = F.interpolate(p12, scale_factor=16, mode=self.interpolation)
+        p13 = F.interpolate(p13, scale_factor=8, mode=self.interpolation)
+        p14 = F.interpolate(p14, scale_factor=4, mode=self.interpolation)
+
+        return p11, p12, p13, p14
+
+
 if __name__ == '__main__':
     model = MIST_CAM().cuda()
     from ptflops import get_model_complexity_info

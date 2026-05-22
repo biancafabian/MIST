@@ -4,6 +4,12 @@ import numpy as np
 import torch.nn.functional as F
 import torch.nn as nn
 
+try:
+    from mamba_ssm import Mamba
+    MAMBA_AVAILABLE = True
+except ImportError:
+    MAMBA_AVAILABLE = False
+
 
 
 class Attention(nn.Module):
@@ -227,6 +233,84 @@ class Dilated_Conv(nn.Module):
         x_out = F.dropout(x_out, 0.1)
         return x_out
 
+class MambaSSM(nn.Module):
+    """4-direction cross-scan Mamba block. Drop-in replacement for Attention (no residual)."""
+
+    def __init__(self, channels, d_state=16, d_conv=4, expand=2):
+        super().__init__()
+        if not MAMBA_AVAILABLE:
+            raise ImportError(
+                "mamba_ssm not installed. On Colab run:\n"
+                "  !pip install causal-conv1d>=1.4.0 --no-build-isolation\n"
+                "  !pip install mamba-ssm --no-build-isolation"
+            )
+        self.norm = nn.LayerNorm(channels)
+        self.mamba_lr = Mamba(d_model=channels, d_state=d_state, d_conv=d_conv, expand=expand)
+        self.mamba_rl = Mamba(d_model=channels, d_state=d_state, d_conv=d_conv, expand=expand)
+        self.mamba_tb = Mamba(d_model=channels, d_state=d_state, d_conv=d_conv, expand=expand)
+        self.mamba_bt = Mamba(d_model=channels, d_state=d_state, d_conv=d_conv, expand=expand)
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+        # normalize in channel-last format before scanning
+        xn = self.norm(x.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)  # (B, C, H, W)
+
+        # row-major sequences: left→right and right→left
+        seq_lr = xn.flatten(2).permute(0, 2, 1)                      # (B, H*W, C)
+        seq_rl = seq_lr.flip(1)
+
+        # col-major sequences: top→bottom and bottom→top (transpose H,W before flatten)
+        seq_tb = xn.permute(0, 1, 3, 2).flatten(2).permute(0, 2, 1)  # (B, H*W, C)
+        seq_bt = seq_tb.flip(1)
+
+        out_lr = self.mamba_lr(seq_lr)
+        out_rl = self.mamba_rl(seq_rl).flip(1)
+        out_tb = self.mamba_tb(seq_tb)
+        out_bt = self.mamba_bt(seq_bt).flip(1)
+
+        # reshape row-major outputs back to spatial
+        def row_to_spatial(t):
+            return t.permute(0, 2, 1).reshape(B, C, H, W)
+
+        # reshape col-major outputs back to spatial (un-transpose H,W)
+        def col_to_spatial(t):
+            return t.permute(0, 2, 1).reshape(B, C, W, H).permute(0, 1, 3, 2)
+
+        merged = (
+            row_to_spatial(out_lr) +
+            row_to_spatial(out_rl) +
+            col_to_spatial(out_tb) +
+            col_to_spatial(out_bt)
+        ) / 4.0
+
+        return merged  # (B, C, H, W) — no residual, matches Attention interface
+
+
+class MambaTransformer(nn.Module):
+    """Transformer block with Mamba SS2D replacing multi-head attention. Keeps Wide-Focus FFN."""
+
+    def __init__(self, out_channels, num_heads, dpr,
+                 proj_drop=0.0, attention_bias=True,
+                 padding_q="same", padding_kv="same",
+                 stride_kv=1, stride_q=1):
+        super().__init__()
+        self.attention_output = MambaSSM(channels=out_channels)
+        self.conv1 = nn.Conv2d(out_channels, out_channels, 3, 1, padding="same")
+        self.layernorm = nn.LayerNorm(out_channels, eps=1e-5)
+        self.wide_focus = Dilated_Conv(out_channels, out_channels)
+
+    def forward(self, x):
+        x1 = self.attention_output(x)
+        x1 = self.conv1(x1)
+        x2 = torch.add(x1, x)
+        x3 = x2.permute(0, 2, 3, 1)
+        x3 = self.layernorm(x3)
+        x3 = x3.permute(0, 3, 1, 2)
+        x3 = self.wide_focus(x3)
+        x3 = torch.add(x2, x3)
+        return x3
+
+
 class Block_decoder(nn.Module):
     def __init__(self, in_channels, out_channels, att_heads, dpr):
         super().__init__()
@@ -273,6 +357,30 @@ class Block_decoder1(nn.Module):
         x1 = torch.cat((skip, x1), axis=1)
         x1 = F.relu(self.conv2(x1))
         x1 = F.relu(self.conv3(x1))
+        x1 = F.dropout(x1, 0.3)
+        out = self.trans(x1)
+        return out
+
+
+class Block_decoder_mamba(nn.Module):
+    """Decoder block identical to Block_decoder but uses MambaTransformer instead of Transformer."""
+
+    def __init__(self, in_channels, out_channels, att_heads, dpr):
+        super().__init__()
+        self.layernorm = nn.LayerNorm(in_channels, eps=1e-5)
+        self.upsample = nn.Upsample(scale_factor=2)
+        self.conv1 = nn.Conv2d(in_channels, out_channels, 3, 1, padding="same")
+        self.conv2 = nn.Conv2d(out_channels * 2, out_channels, 3, 1, padding="same")
+        self.trans = MambaTransformer(out_channels, att_heads, dpr)
+
+    def forward(self, x, skip):
+        x1 = x.permute(0, 2, 3, 1)
+        x1 = self.layernorm(x1)
+        x1 = x1.permute(0, 3, 1, 2)
+        x1 = self.upsample(x1)
+        x1 = F.relu(self.conv1(x1))
+        x1 = torch.cat((skip, x1), axis=1)
+        x1 = F.relu(self.conv2(x1))
         x1 = F.dropout(x1, 0.3)
         out = self.trans(x1)
         return out
@@ -398,6 +506,46 @@ class CAM(nn.Module):
         #print(f"Block 9 out -> {list(x.size())}")
         out1 = x
         return out4, out3, out2, out1
+class CAM_Mamba(nn.Module):
+    """CAM decoder with Mamba SS2D blocks replacing attention in decoder stages 6-9.
+    Bottleneck (block_5) keeps the original Transformer — spatial size is 4x4 there,
+    too short for Mamba to offer any benefit over attention.
+    """
+
+    def __init__(self, args):
+        super().__init__()
+
+        att_heads = [2, 4, 8, 12, 16, 12, 8, 4, 2]
+        filters = [96, 192, 384, 768, 768 * 2, 768, 384, 192, 96]
+
+        blocks = len(filters)
+        stochastic_depth_rate = 1.0
+        dpr = [x for x in np.linspace(0, stochastic_depth_rate, blocks)]
+
+        self.drp_out = 0.3
+
+        # bottleneck: spatial size 4x4 (L=16) — keep original Transformer
+        self.block_5 = Block_encoder_bottleneck("bottleneck", filters[3], filters[4], att_heads[4], dpr[4])
+
+        # decoder stages: spatial sizes grow 8x8 → 16x16 → 32x32 → 64x64 — use Mamba
+        self.block_6 = Block_decoder_mamba(filters[4], filters[5], att_heads[5], dpr[5])
+        self.block_7 = Block_decoder_mamba(filters[5], filters[6], att_heads[6], dpr[6])
+        self.block_8 = Block_decoder_mamba(filters[6], filters[7], att_heads[7], dpr[7])
+        self.block_9 = Block_decoder_mamba(filters[7], filters[8], att_heads[8], dpr[8])
+
+    def forward(self, skip1, skip2, skip3, skip4):
+        x = self.block_5(skip4)
+        x = self.block_6(x, skip4)
+        out4 = x
+        x = self.block_7(x, skip3)
+        out3 = x
+        x = self.block_8(x, skip2)
+        out2 = x
+        x = self.block_9(x, skip1)
+        out1 = x
+        return out4, out3, out2, out1
+
+
 class FCT1(nn.Module):
     def __init__(self, args):
         super().__init__()

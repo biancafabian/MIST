@@ -29,7 +29,7 @@ from utils.utils import powerset
 from utils.utils import DiceLoss, calculate_dice_percase, val_single_volume
 from utils.dataset_ACDC import ACDCdataset, RandomGenerator
 from test_ACDC import inference
-from lib.networks import MIST_CAM
+from lib.networks import MIST_CAM_Mamba
 
 
 # In[2]:
@@ -82,8 +82,8 @@ torch.manual_seed(args.seed)
 torch.cuda.manual_seed(args.seed)
 
 args.is_pretrain = True
-args.exp = 'MIST_CAM_loss_MUTATION_w3_7_' + str(args.img_size)
-snapshot_path = "{}/{}/{}".format(args.save_path, args.exp, 'MIST_CAM_loss_MUTATION_w3_7')
+args.exp = 'MIST_CAM_Mamba_loss_MUTATION_w3_7_' + str(args.img_size)
+snapshot_path = "{}/{}/{}".format(args.save_path, args.exp, 'MIST_CAM_Mamba_loss_MUTATION_w3_7')
 snapshot_path = snapshot_path + '_pretrain' if args.is_pretrain else snapshot_path
 snapshot_path = snapshot_path + '_epo' +str(args.max_epochs) if args.max_epochs != 30 else snapshot_path
 snapshot_path = snapshot_path+'_bs'+str(args.batch_size)
@@ -107,7 +107,7 @@ if not os.path.exists(test_save_path):
 # In[5]:
 
 
-net = MIST_CAM(n_class=args.num_classes, img_size_s1=(args.img_size,args.img_size), img_size_s2=(224,224), model_scale='small', decoder_aggregation='additive', interpolation='bilinear').cuda()
+net = MIST_CAM_Mamba(n_class=args.num_classes, img_size_s1=(args.img_size,args.img_size), img_size_s2=(224,224), model_scale='small', decoder_aggregation='additive', interpolation='bilinear').cuda()
 
 if args.checkpoint:
     net.load_state_dict(torch.load(args.checkpoint, map_location='cpu', weights_only=False))
@@ -331,8 +331,8 @@ if __name__ == "__main__":
     torch.cuda.manual_seed(args.seed)
 
     args.is_pretrain = True
-    args.exp = 'MIST_CAM_loss_MUTATION_w3_7_' + str(args.img_size)
-    snapshot_path = "{}/{}/{}".format(args.save_path, args.exp, 'MIST_CAM_loss_MUTATION_w3_7')
+    args.exp = 'MIST_CAM_Mamba_loss_MUTATION_w3_7_' + str(args.img_size)
+    snapshot_path = "{}/{}/{}".format(args.save_path, args.exp, 'MIST_CAM_Mamba_loss_MUTATION_w3_7')
     snapshot_path = snapshot_path + '_pretrain' if args.is_pretrain else snapshot_path
     snapshot_path = snapshot_path + '_epo' +str(args.max_epochs) if args.max_epochs != 30 else snapshot_path
     snapshot_path = snapshot_path+'_bs'+str(args.batch_size)
@@ -343,7 +343,7 @@ if __name__ == "__main__":
     print("The current time is", current_time)
     snapshot_path = snapshot_path +'_run'+current_time # replace 'current_time' with the 'current_time' in your trained folder from 'model_pth' directory
 
-    net = MIST_CAM(n_class=args.num_classes, img_size_s1=(args.img_size,args.img_size), img_size_s2=(224,224), model_scale='small', decoder_aggregation='additive', interpolation='bilinear').cuda()
+    net = MIST_CAM_Mamba(n_class=args.num_classes, img_size_s1=(args.img_size,args.img_size), img_size_s2=(224,224), model_scale='small', decoder_aggregation='additive', interpolation='bilinear').cuda()
 
     snapshot = os.path.join(snapshot_path, 'best.pth')
     print(snapshot)

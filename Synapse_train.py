@@ -14,7 +14,7 @@ import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 
-from lib.networks import MIST_CAM
+from lib.networks import MIST_CAM_Mamba
 
 from trainer import trainer_synapse
 
@@ -106,8 +106,8 @@ if __name__ == "__main__":
     args.list_dir = dataset_config[dataset_name]['list_dir']
     args.is_pretrain = True
 
-    args.exp = 'MIST_CAM_loss_MUTATION_w3_7_' + dataset_name + str(args.img_size)
-    snapshot_path = "model_pth/{}/{}".format(args.exp, 'MIST_CAM_loss_MUTATION_w3_7')
+    args.exp = 'MIST_CAM_Mamba_loss_MUTATION_w3_7_' + dataset_name + str(args.img_size)
+    snapshot_path = "model_pth/{}/{}".format(args.exp, 'MIST_CAM_Mamba_loss_MUTATION_w3_7')
     snapshot_path = snapshot_path + '_pretrain' if args.is_pretrain else snapshot_path
     snapshot_path = snapshot_path+'_'+str(args.max_iterations)[0:2]+'k' if args.max_iterations != 30000 else snapshot_path
     snapshot_path = snapshot_path + '_epo' +str(args.max_epochs) if args.max_epochs != 30 else snapshot_path
@@ -122,11 +122,11 @@ if __name__ == "__main__":
     if not os.path.exists(snapshot_path):
         os.makedirs(snapshot_path)
     
-    net = MERIT_Parallel_Modified3(n_class=args.num_classes, img_size_s1=(args.img_size,args.img_size), img_size_s2=(224,224), model_scale='small', decoder_aggregation='additive', interpolation='bilinear')
+    net = MIST_CAM_Mamba(n_class=args.num_classes, img_size_s1=(args.img_size,args.img_size), img_size_s2=(224,224), model_scale='small', decoder_aggregation='additive', interpolation='bilinear')
 
-    
+
     print('Model %s created, param count: %d' %
-                     ('MIST_CAM: ', sum([m.numel() for m in net.parameters()])))
+                     ('MIST_CAM_Mamba: ', sum([m.numel() for m in net.parameters()])))
 
     net = net.cuda()
    
