@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from torch.cuda.amp import GradScaler, autocast
 from torch.nn.modules.loss import CrossEntropyLoss
 import torchvision
 from torchvision import transforms
@@ -109,8 +110,7 @@ if not os.path.exists(test_save_path):
 
 net = MIST_CAM_Mamba(n_class=args.num_classes, img_size_s1=(args.img_size,args.img_size), img_size_s2=(224,224), model_scale='small', decoder_aggregation='additive', interpolation='bilinear').cuda()
 
-if args.checkpoint:
-    net.load_state_dict(torch.load(args.checkpoint, map_location='cpu', weights_only=False))
+# checkpoint loading is deferred until after optimizer/scaler are created (see below)
 
 train_dataset = ACDCdataset(args.root_dir, args.list_dir, split="train", transform=
                                    transforms.Compose(
@@ -151,6 +151,23 @@ max_iterations = args.max_epochs * len(train_loader)
 base_lr = args.lr
 optimizer = optim.AdamW(net.parameters(), lr=base_lr, weight_decay=0.0001)
 #optimizer = optim.SGD(net.parameters(), lr=base_lr, momentum=0.9, weight_decay=0.0001)
+scaler = GradScaler()
+
+start_epoch = 0
+start_iter = 0
+
+if args.checkpoint:
+    ckpt = torch.load(args.checkpoint, map_location='cpu', weights_only=False)
+    if isinstance(ckpt, dict) and 'model_state_dict' in ckpt:
+        net.load_state_dict(ckpt['model_state_dict'])
+        optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+        scaler.load_state_dict(ckpt['scaler_state_dict'])
+        start_epoch = ckpt['epoch'] + 1
+        start_iter = ckpt['iter_num']
+        Best_dcs = ckpt.get('best_dcs', Best_dcs)
+        print(f"Resumed from epoch {ckpt['epoch']}, iter {ckpt['iter_num']}, best_dcs {Best_dcs:.4f}")
+    else:
+        net.load_state_dict(ckpt)
 
 
 # In[7]:
@@ -171,7 +188,9 @@ def val():
             val_image_batch = zoom(val_image_batch, (args.img_size / x, args.img_size / y), order=3) # not for double_maxvits
         val_image_batch = torch.from_numpy(val_image_batch).unsqueeze(0).unsqueeze(0).float().cuda()
         
-        P = net(val_image_batch)
+        with torch.no_grad():
+            with autocast():
+                P = net(val_image_batch)
         #print(len(P))
 
         val_outputs = 0.0
@@ -203,9 +222,9 @@ l = [0, 1, 2, 3]
 ss = [x for x in powerset(l)] # for mutation
 #ss = [[0],[1],[2],[3]] # for only four-stage loss, no mutation
 #print(ss)
-iter_num = 0
+iter_num = start_iter
 best_state_dict=net.state_dict()
-for epoch in tqdm(range(args.max_epochs)):
+for epoch in tqdm(range(start_epoch, args.max_epochs)):
     net.train()
     train_loss = 0
     for i_batch, sampled_batch in enumerate(train_loader):
@@ -213,24 +232,26 @@ for epoch in tqdm(range(args.max_epochs)):
         image_batch, label_batch = image_batch.type(torch.FloatTensor), label_batch.type(torch.FloatTensor)
         image_batch, label_batch = image_batch.cuda(), label_batch.cuda()
         
-        P = net(image_batch)
-        loss = 0.0
-        lc1, lc2 = 0.3, 0.7
-                  
-        for s in ss:
-            iout = 0.0
-            if(s==[]):
-                continue
-            #print(s)
-            for idx in range(len(s)):
-                iout += P[s[idx]]
-            loss_ce = ce_loss(iout, label_batch[:].long())
-            loss_dice = dice_loss(iout, label_batch, softmax=True)
-            loss += (lc1 * loss_ce + lc2 * loss_dice) 
-           
+        with autocast():
+            P = net(image_batch)
+            loss = 0.0
+            lc1, lc2 = 0.3, 0.7
+
+            for s in ss:
+                iout = 0.0
+                if(s==[]):
+                    continue
+                #print(s)
+                for idx in range(len(s)):
+                    iout += P[s[idx]]
+                loss_ce = ce_loss(iout, label_batch[:].long())
+                loss_dice = dice_loss(iout, label_batch, softmax=True)
+                loss += (lc1 * loss_ce + lc2 * loss_dice)
+
         optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
 
         #lr_ = base_lr * (1.0 - iter_num / max_iterations) ** 0.9 # We did not use this
         lr_ = base_lr * 0.5 * (1 + np.cos(np.pi * iter_num / max_iterations))
@@ -247,16 +268,23 @@ for epoch in tqdm(range(args.max_epochs)):
     print('iteration %d : loss : %f lr_: %f' % (iter_num, loss.item(), lr_))
     
     save_model_path = os.path.join(snapshot_path, 'last.pth')
-    torch.save(net.state_dict(), save_model_path)
+    torch.save({
+        'epoch': epoch,
+        'iter_num': iter_num,
+        'model_state_dict': net.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'scaler_state_dict': scaler.state_dict(),
+        'best_dcs': Best_dcs,
+    }, save_model_path)
 
     
     avg_dcs = val()
         
     if avg_dcs > Best_dcs:
-        #save_model_path = os.path.join(snapshot_path, 'best.pth')
+        save_model_path = os.path.join(snapshot_path, 'best.pth')
         best_state_dict=net.state_dict()
-        #torch.save(net.state_dict(), save_model_path)
-        #logging.info("save model to {}".format(save_model_path))
+        torch.save(net.state_dict(), save_model_path)
+        logging.info("save model to {}".format(save_model_path))
         print("save model to {}".format(save_model_path))
 
         Best_dcs = avg_dcs
