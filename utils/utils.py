@@ -3,8 +3,49 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from medpy import metric
-from scipy.ndimage import zoom
+from scipy.ndimage import zoom, binary_erosion, distance_transform_edt
+
+
+# ---------------------------------------------------------------------------
+# medpy drop-in replacements (medpy 0.4.0 is incompatible with scipy>=1.10
+# and numpy 2.x, both present on Python 3.12 environments)
+# ---------------------------------------------------------------------------
+def _dc(result, reference):
+    result = np.atleast_1d(result.astype(bool))
+    reference = np.atleast_1d(reference.astype(bool))
+    intersection = np.count_nonzero(result & reference)
+    denom = np.count_nonzero(result) + np.count_nonzero(reference)
+    return 2.0 * intersection / float(denom) if denom else 0.0
+
+def _jc(result, reference):
+    result = np.atleast_1d(result.astype(bool))
+    reference = np.atleast_1d(reference.astype(bool))
+    union = np.count_nonzero(result | reference)
+    return np.count_nonzero(result & reference) / float(union) if union else 0.0
+
+def _surface_distances(result, reference):
+    result_border    = result    ^ binary_erosion(result)
+    reference_border = reference ^ binary_erosion(reference)
+    dt_ref    = distance_transform_edt(~reference)
+    dt_result = distance_transform_edt(~result)
+    return dt_ref[result_border], dt_result[reference_border]
+
+def _hd95(result, reference):
+    result    = np.atleast_1d(result.astype(bool))
+    reference = np.atleast_1d(reference.astype(bool))
+    if not result.any() or not reference.any():
+        return 0.0
+    d1, d2 = _surface_distances(result, reference)
+    return float(np.percentile(np.hstack([d1, d2]), 95))
+
+def _assd(result, reference):
+    result    = np.atleast_1d(result.astype(bool))
+    reference = np.atleast_1d(reference.astype(bool))
+    if not result.any() or not reference.any():
+        return 0.0
+    d1, d2 = _surface_distances(result, reference)
+    n = len(d1) + len(d2)
+    return float((d1.sum() + d2.sum()) / n) if n else 0.0
 import seaborn as sns
 from PIL import Image 
 import matplotlib.pyplot as plt
@@ -172,10 +213,10 @@ def calculate_metric_percase(pred, gt):
     pred[pred > 0] = 1
     gt[gt > 0] = 1
     if pred.sum() > 0 and gt.sum()>0:
-        dice = metric.binary.dc(pred, gt)
-        hd95 = metric.binary.hd95(pred, gt)
-        jaccard = metric.binary.jc(pred, gt)
-        asd = metric.binary.assd(pred, gt)
+        dice = _dc(pred, gt)
+        hd95 = _hd95(pred, gt)
+        jaccard = _jc(pred, gt)
+        asd = _assd(pred, gt)
         return dice, hd95, jaccard, asd
     elif pred.sum() > 0 and gt.sum()==0:
         return 1, 0, 1, 0
@@ -186,7 +227,7 @@ def calculate_dice_percase(pred, gt):
     pred[pred > 0] = 1
     gt[gt > 0] = 1
     if pred.sum() > 0 and gt.sum()>0:
-        dice = metric.binary.dc(pred, gt)
+        dice = _dc(pred, gt)
         return dice
     elif pred.sum() > 0 and gt.sum()==0:
         return 1
