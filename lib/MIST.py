@@ -179,21 +179,19 @@ class Transformer(nn.Module):
         self.conv1 = nn.Conv2d(out_channels, out_channels, 3, 1, padding="same")
         self.layernorm = nn.LayerNorm(self.conv1.out_channels, eps=1e-5)
         self.wide_focus = Dilated_Conv(out_channels, out_channels)
-        #self.cbam=CBAM(out_channels)
+        self.ssam = CBAM(out_channels)  # Spatial + Squeeze-Excitation Attention Module (paper Eq 8-11)
 
     def forward(self, x):
         x1 = self.attention_output(x)
         x1 = self.conv1(x1)
-        x2 = torch.add(x1, x)
+        x2 = torch.add(x1, x)           # X'' = MSA + input  (paper Eq 4)
         x3 = x2.permute(0, 2, 3, 1)
         x3 = self.layernorm(x3)
         x3 = x3.permute(0, 3, 1, 2)
         x3 = self.wide_focus(x3)
-        x3 = torch.add(x2, x3)
-        #extras
-        #x4=self.cbam(x3)
-        #x4 = torch.add(x2, x4)
-        return x3
+        x3 = torch.add(x2, x3)          # X''' = SWC + X''  (paper Eq 7)
+        # Paper Eq 11: X'''' = SSAM(X''') + X''' + X''
+        return self.ssam(x3) + x3 + x2
 
 
 class Dilated_Conv(nn.Module):

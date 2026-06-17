@@ -22,7 +22,7 @@ import time
 import torch, gc
 import numpy as np
 from tqdm import tqdm
-from medpy.metric import dc,hd95
+from utils.utils import _dc as dc
 from scipy.ndimage import zoom
 
 from utils.utils import powerset

@@ -121,23 +121,16 @@ def trainer_synapse(args, model, snapshot_path):
              
         logging.info('iteration %d, epoch %d : loss : %f, lr: %f' % (iter_num, epoch_num, loss.item(), lr_))        
        
-        #save_mode_path = os.path.join(snapshot_path, 'last.pth')
-        #torch.save(model.state_dict(), save_mode_path)
-        
-        #performance = inference(args, model, best_performance)
-        
-        #save_interval = 100
+        save_mode_path = os.path.join(snapshot_path, 'last.pth')
+        torch.save(model.state_dict(), save_mode_path)
 
-        #if(best_performance <= performance):
-         #   best_performance = performance
-         #   save_mode_path = os.path.join(snapshot_path, 'best.pth')
-         #   torch.save(model.state_dict(), save_mode_path)
-          #  logging.info("save model to {}".format(save_mode_path))
-            
-        #if (epoch_num + 1) % save_interval == 0:
-            #save_mode_path = os.path.join(snapshot_path, 'epoch_' + str(epoch_num) + '.pth')
-            #torch.save(model.state_dict(), save_mode_path)
-            #logging.info("save model to {}".format(save_mode_path))
+        performance = inference(args, model, best_performance)
+
+        if best_performance <= performance:
+            best_performance = performance
+            save_mode_path = os.path.join(snapshot_path, 'best.pth')
+            torch.save(model.state_dict(), save_mode_path)
+            logging.info("save model to {}".format(save_mode_path))
 
         if epoch_num >= max_epoch - 1:
             save_mode_path = os.path.join(snapshot_path, 'epoch_' + str(epoch_num) + '.pth')
