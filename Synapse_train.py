@@ -106,8 +106,8 @@ if __name__ == "__main__":
     args.list_dir = dataset_config[dataset_name]['list_dir']
     args.is_pretrain = True
 
-    args.exp = 'MIST_CAM_loss_MUTATION_w3_7_' + dataset_name + str(args.img_size)
-    snapshot_path = "model_pth/{}/{}".format(args.exp, 'MIST_CAM_loss_MUTATION_w3_7')
+    args.exp = 'MIST_CAM_AG_BndLoss_' + dataset_name + str(args.img_size)
+    snapshot_path = "model_pth/{}/{}".format(args.exp, 'MIST_CAM_AG_BndLoss')
     snapshot_path = snapshot_path + '_pretrain' if args.is_pretrain else snapshot_path
     snapshot_path = snapshot_path+'_'+str(args.max_iterations)[0:2]+'k' if args.max_iterations != 30000 else snapshot_path
     snapshot_path = snapshot_path + '_epo' +str(args.max_epochs) if args.max_epochs != 30 else snapshot_path

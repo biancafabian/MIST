@@ -19,7 +19,7 @@ from torch.cuda.amp import GradScaler, autocast
 from utils.dataset_synapse import Synapse_dataset, RandomGenerator
 from utils.utils import powerset
 from utils.utils import one_hot_encoder
-from utils.utils import DiceLoss
+from utils.utils import DiceLoss, BoundaryLoss
 from utils.utils import val_single_volume
 
             
@@ -63,8 +63,8 @@ def trainer_synapse(args, model, snapshot_path):
     if args.n_gpu > 1:
         model = nn.DataParallel(model)
     model.train()
-    ce_loss = CrossEntropyLoss()
     dice_loss = DiceLoss(num_classes)
+    boundary_loss = BoundaryLoss(num_classes, w=3)
 
     #optimizer = optim.SGD(model.parameters(), lr=base_lr, momentum=0.9, weight_decay=0.0001)
     optimizer = optim.AdamW(model.parameters(), lr=base_lr, weight_decay=0.0001)
@@ -99,9 +99,9 @@ def trainer_synapse(args, model, snapshot_path):
                     continue
                 for idx in range(len(s)):
                     iout += P[s[idx]]
-                loss_ce = ce_loss(iout, label_batch[:].long())
                 loss_dice = dice_loss(iout, label_batch, softmax=True)
-                loss += (lc1 * loss_ce + lc2 * loss_dice)
+                loss_bnd = boundary_loss(iout, label_batch[:].long())
+                loss += (lc1 * loss_bnd + lc2 * loss_dice)
            
             optimizer.zero_grad()
             loss.backward()

@@ -26,7 +26,7 @@ from medpy.metric import dc,hd95
 from scipy.ndimage import zoom
 
 from utils.utils import powerset
-from utils.utils import DiceLoss, calculate_dice_percase, val_single_volume
+from utils.utils import DiceLoss, BoundaryLoss, calculate_dice_percase, val_single_volume
 from utils.dataset_ACDC import ACDCdataset, RandomGenerator
 from test_ACDC import inference
 from lib.networks import MIST_CAM
@@ -63,6 +63,8 @@ parser.add_argument('--deterministic', type=int, default=1,
                     help='whether use deterministic training')
 parser.add_argument('--seed', type=int,
                     default=2222, help='random seed')
+parser.add_argument('--boundary_weight', type=float, default=0.1,
+                    help='weight b for boundary-aware loss term')
 args = parser.parse_args()
 
 
@@ -82,8 +84,8 @@ torch.manual_seed(args.seed)
 torch.cuda.manual_seed(args.seed)
 
 args.is_pretrain = True
-args.exp = 'MIST_CAM_loss_MUTATION_w3_7_' + str(args.img_size)
-snapshot_path = "{}/{}/{}".format(args.save_path, args.exp, 'MIST_CAM_loss_MUTATION_w3_7')
+args.exp = 'MIST_CAM_AG_BndLoss_' + str(args.img_size)
+snapshot_path = "{}/{}/{}".format(args.save_path, args.exp, 'MIST_CAM_AG_BndLoss')
 snapshot_path = snapshot_path + '_pretrain' if args.is_pretrain else snapshot_path
 snapshot_path = snapshot_path + '_epo' +str(args.max_epochs) if args.max_epochs != 30 else snapshot_path
 snapshot_path = snapshot_path+'_bs'+str(args.batch_size)
@@ -131,8 +133,8 @@ if args.n_gpu > 1:
 
 net = net.cuda()
 net.train()
-ce_loss = CrossEntropyLoss()
 dice_loss = DiceLoss(args.num_classes)
+boundary_loss = BoundaryLoss(args.num_classes, w=3)
 #save_interval = args.n_skip
 
 # iterator = tqdm(range(0, args.max_epochs), ncols=70)
@@ -224,9 +226,9 @@ for epoch in tqdm(range(args.max_epochs)):
             #print(s)
             for idx in range(len(s)):
                 iout += P[s[idx]]
-            loss_ce = ce_loss(iout, label_batch[:].long())
             loss_dice = dice_loss(iout, label_batch, softmax=True)
-            loss += (lc1 * loss_ce + lc2 * loss_dice) 
+            loss_bnd = boundary_loss(iout, label_batch[:].long())
+            loss += (lc1 * loss_bnd + lc2 * loss_dice)
            
         optimizer.zero_grad()
         loss.backward()
