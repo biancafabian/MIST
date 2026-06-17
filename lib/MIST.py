@@ -85,7 +85,7 @@ class Attention(nn.Module):
 
         x1 = x1[0].permute(0, 2, 1)
         x1 = x1.view(x1.shape[0], x1.shape[1], np.sqrt(x1.shape[2]).astype(int), np.sqrt(x1.shape[2]).astype(int))
-        x1 = F.dropout(x1, self.proj_drop)
+        x1 = F.dropout(x1, self.proj_drop, training=self.training)
 
         return x1
 
@@ -219,18 +219,18 @@ class Dilated_Conv(nn.Module):
     def forward(self, x):
         x1 = self.conv1(x)
         x1 = F.gelu(x1)
-        x1 = F.dropout(x1, 0.1)
+        x1 = F.dropout(x1, 0.1, training=self.training)
         x2 = self.conv2(x)
         x2 = F.gelu(x2)
-        x2 = F.dropout(x2, 0.1)
+        x2 = F.dropout(x2, 0.1, training=self.training)
         x3=self.conv3(x)
         x3=F.gelu(x3)
-        x3=F.dropout(x3, 0.1)
+        x3=F.dropout(x3, 0.1, training=self.training)
         added = torch.add(x1, x2)
         added = torch.add(added, x3)
         x_out = self.conv4(added)
         x_out = F.gelu(x_out)
-        x_out = F.dropout(x_out, 0.1)
+        x_out = F.dropout(x_out, 0.1, training=self.training)
         return x_out
 
 class MambaSSM(nn.Module):
@@ -330,7 +330,7 @@ class Block_decoder(nn.Module):
         x1 = F.relu(self.conv1(x1))
         x1 = torch.cat((skip, x1), axis=1)
         x1 = F.relu(self.conv2(x1))
-        x1 = F.dropout(x1, 0.3)
+        x1 = F.dropout(x1, 0.3, training=self.training)
         #x1 = F.relu(self.conv3(x1))
         #x2=F.relu(self.convd1(x1))
         #x3=F.relu(self.convd2(x2))
@@ -357,7 +357,7 @@ class Block_decoder1(nn.Module):
         x1 = torch.cat((skip, x1), axis=1)
         x1 = F.relu(self.conv2(x1))
         x1 = F.relu(self.conv3(x1))
-        x1 = F.dropout(x1, 0.3)
+        x1 = F.dropout(x1, 0.3, training=self.training)
         out = self.trans(x1)
         return out
 
@@ -381,7 +381,7 @@ class Block_decoder_mamba(nn.Module):
         x1 = F.relu(self.conv1(x1))
         x1 = torch.cat((skip, x1), axis=1)
         x1 = F.relu(self.conv2(x1))
-        x1 = F.dropout(x1, 0.3)
+        x1 = F.dropout(x1, 0.3, training=self.training)
         out = self.trans(x1)
         return out
 
@@ -440,7 +440,7 @@ class Block_encoder_bottleneck(nn.Module):
             x1 = x1.permute(0, 3, 1, 2)
             x1 = F.relu(self.conv1(x1))
             x1 = F.relu(self.conv2(x1))
-            x1 = F.dropout(x1, 0.3)
+            x1 = F.dropout(x1, 0.3, training=self.training)
             x1 = F.max_pool2d(x1, (2, 2))
             out = self.trans(x1)
             # without skip
@@ -451,7 +451,7 @@ class Block_encoder_bottleneck(nn.Module):
             x1 = torch.cat((F.relu(self.conv1(scale_img)), x1), axis=1)
             x1 = F.relu(self.conv2(x1))
             x1 = F.relu(self.conv3(x1))
-            x1 = F.dropout(x1, 0.3)
+            x1 = F.dropout(x1, 0.3, training=self.training)
             x1 = F.max_pool2d(x1, (2, 2))
             out = self.trans(x1)
             # with skip
