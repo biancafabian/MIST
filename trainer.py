@@ -63,6 +63,7 @@ def trainer_synapse(args, model, snapshot_path):
     if args.n_gpu > 1:
         model = nn.DataParallel(model)
     model.train()
+    ce_loss = CrossEntropyLoss()
     dice_loss = DiceLoss(num_classes)
     boundary_loss = BoundaryLoss(num_classes, w=3)
 
@@ -89,9 +90,8 @@ def trainer_synapse(args, model, snapshot_path):
             P = model(image_batch)            
            
             loss = 0.0
-            lc1, lc2 = 0.3, 0.7 #0.3, 0.7
-            #print(label_batch.shape)
-          
+            lc1, lc2, lc3 = 0.7, 0.3, 0.2
+
             for s in ss:
                 iout = 0.0
                 #print(s)
@@ -100,8 +100,9 @@ def trainer_synapse(args, model, snapshot_path):
                 for idx in range(len(s)):
                     iout += P[s[idx]]
                 loss_dice = dice_loss(iout, label_batch, softmax=True)
-                loss_bnd = boundary_loss(iout, label_batch[:].long())
-                loss += (lc1 * loss_bnd + lc2 * loss_dice)
+                loss_ce   = ce_loss(iout, label_batch[:].long())
+                loss_bnd  = boundary_loss(iout, label_batch[:].long())
+                loss += (lc1 * loss_dice + lc2 * loss_ce + lc3 * loss_bnd)
            
             optimizer.zero_grad()
             loss.backward()

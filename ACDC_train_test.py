@@ -48,7 +48,7 @@ parser = argparse.ArgumentParser(description='Searching longest common substring
                     'Written by Ilya Stepanov (c) 2013')
 parser.add_argument("--batch_size", type=int, default=12, help="batch size")
 parser.add_argument("--lr", type=float, default=0.0001, help="learning rate")
-parser.add_argument("--max_epochs", type=int, default=400)
+parser.add_argument("--max_epochs", type=int, default=300)
 parser.add_argument("--img_size", type=int, default=256)
 parser.add_argument("--save_path", default="./model_pth/data")
 parser.add_argument("--n_gpu", type=int, default=1)
@@ -133,6 +133,7 @@ if args.n_gpu > 1:
 
 net = net.cuda()
 net.train()
+ce_loss = CrossEntropyLoss()
 dice_loss = DiceLoss(args.num_classes)
 boundary_loss = BoundaryLoss(args.num_classes, w=3)
 #save_interval = args.n_skip
@@ -217,8 +218,8 @@ for epoch in tqdm(range(args.max_epochs)):
         
         P = net(image_batch)
         loss = 0.0
-        lc1, lc2 = 0.3, 0.7
-                  
+        lc1, lc2, lc3 = 0.7, 0.3, 0.2
+
         for s in ss:
             iout = 0.0
             if(s==[]):
@@ -227,8 +228,9 @@ for epoch in tqdm(range(args.max_epochs)):
             for idx in range(len(s)):
                 iout += P[s[idx]]
             loss_dice = dice_loss(iout, label_batch, softmax=True)
-            loss_bnd = boundary_loss(iout, label_batch[:].long())
-            loss += (lc1 * loss_bnd + lc2 * loss_dice)
+            loss_ce   = ce_loss(iout, label_batch[:].long())
+            loss_bnd  = boundary_loss(iout, label_batch[:].long())
+            loss += (lc1 * loss_dice + lc2 * loss_ce + lc3 * loss_bnd)
            
         optimizer.zero_grad()
         loss.backward()
