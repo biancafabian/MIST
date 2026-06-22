@@ -196,33 +196,24 @@ class Transformer(nn.Module):
 
 class Dilated_Conv(nn.Module):
     """
-    Wide-Focus module.
+    Shallow-wise convolution (SWC) module — paper Eq. 5-6.
+    Two dilated branches (d=2 and d=3) are concatenated then projected,
+    matching the ablation winner in Table 3 (concatenation, dilations 2 and 3).
     """
 
-    def __init__(self,
-                 in_channels,
-                 out_channels):
+    def __init__(self, in_channels, out_channels):
         super().__init__()
-        self.conv1=  nn.Conv2d(in_channels, out_channels, 3, 1, padding="same")
-        self.conv2 = nn.Conv2d(in_channels, out_channels, 3, 1, padding="same", dilation=2)
-        self.conv3 = nn.Conv2d(in_channels, out_channels, 3, 1, padding="same", dilation=3)
-        self.conv4 = nn.Conv2d(in_channels, out_channels, 3, 1, padding="same")
+        self.conv_d2  = nn.Conv2d(in_channels, out_channels, 3, 1, padding="same", dilation=2)
+        self.conv_d3  = nn.Conv2d(in_channels, out_channels, 3, 1, padding="same", dilation=3)
+        self.conv_out = nn.Conv2d(out_channels * 2, out_channels, 3, 1, padding="same")
 
     def forward(self, x):
-        x1 = self.conv1(x)
-        x1 = F.gelu(x1)
-        x1 = F.dropout(x1, 0.1)
-        x2 = self.conv2(x)
-        x2 = F.gelu(x2)
-        x2 = F.dropout(x2, 0.1)
-        x3=self.conv3(x)
-        x3=F.gelu(x3)
-        x3=F.dropout(x3, 0.1)
-        added = torch.add(x1, x2)
-        added = torch.add(added, x3)
-        x_out = self.conv4(added)
-        x_out = F.gelu(x_out)
-        x_out = F.dropout(x_out, 0.1)
+        x1 = F.relu(self.conv_d2(x))
+        x1 = F.dropout(x1, 0.1, training=self.training)
+        x2 = F.relu(self.conv_d3(x))
+        x2 = F.dropout(x2, 0.1, training=self.training)
+        x_out = F.relu(self.conv_out(torch.cat([x1, x2], dim=1)))
+        x_out = F.dropout(x_out, 0.1, training=self.training)
         return x_out
 
 class Block_decoder(nn.Module):
@@ -244,7 +235,7 @@ class Block_decoder(nn.Module):
         x1 = F.relu(self.conv1(x1))
         x1 = torch.cat((skip, x1), axis=1)
         x1 = F.relu(self.conv2(x1))
-        x1 = F.dropout(x1, 0.3)
+        x1 = F.dropout(x1, 0.3, training=self.training)
         #x1 = F.relu(self.conv3(x1))
         #x2=F.relu(self.convd1(x1))
         #x3=F.relu(self.convd2(x2))
@@ -271,7 +262,7 @@ class Block_decoder1(nn.Module):
         x1 = torch.cat((skip, x1), axis=1)
         x1 = F.relu(self.conv2(x1))
         x1 = F.relu(self.conv3(x1))
-        x1 = F.dropout(x1, 0.3)
+        x1 = F.dropout(x1, 0.3, training=self.training)
         out = self.trans(x1)
         return out
 
@@ -330,7 +321,7 @@ class Block_encoder_bottleneck(nn.Module):
             x1 = x1.permute(0, 3, 1, 2)
             x1 = F.relu(self.conv1(x1))
             x1 = F.relu(self.conv2(x1))
-            x1 = F.dropout(x1, 0.3)
+            x1 = F.dropout(x1, 0.3, training=self.training)
             x1 = F.max_pool2d(x1, (2, 2))
             out = self.trans(x1)
             # without skip
@@ -341,7 +332,7 @@ class Block_encoder_bottleneck(nn.Module):
             x1 = torch.cat((F.relu(self.conv1(scale_img)), x1), axis=1)
             x1 = F.relu(self.conv2(x1))
             x1 = F.relu(self.conv3(x1))
-            x1 = F.dropout(x1, 0.3)
+            x1 = F.dropout(x1, 0.3, training=self.training)
             x1 = F.max_pool2d(x1, (2, 2))
             out = self.trans(x1)
             # with skip

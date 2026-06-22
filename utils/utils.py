@@ -2,10 +2,9 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from medpy import metric
-from scipy.ndimage import zoom
+from scipy.ndimage import zoom, binary_erosion, distance_transform_edt
 import seaborn as sns
-from PIL import Image 
+from PIL import Image
 import matplotlib.pyplot as plt
 from segmentation_mask_overlay import overlay_masks
 import matplotlib.colors as mcolors
@@ -17,6 +16,49 @@ import pandas as pd
 
 from thop import profile
 from thop import clever_format
+
+
+# ---------------------------------------------------------------------------
+# Metric helpers (replacing medpy to avoid Python 3.12 / scipy≥1.10 conflict)
+# ---------------------------------------------------------------------------
+
+def _dc(result, reference):
+    result    = np.atleast_1d(result.astype(bool))
+    reference = np.atleast_1d(reference.astype(bool))
+    intersection = np.count_nonzero(result & reference)
+    denom = np.count_nonzero(result) + np.count_nonzero(reference)
+    return 2.0 * intersection / float(denom) if denom else 0.0
+
+
+def _surface_distances(result, reference):
+    rb = result    ^ binary_erosion(result)
+    sb = reference ^ binary_erosion(reference)
+    return distance_transform_edt(~reference)[rb], distance_transform_edt(~result)[sb]
+
+
+def _hd95(result, reference):
+    result, reference = result.astype(bool), reference.astype(bool)
+    if not result.any() or not reference.any():
+        return 0.0
+    d1, d2 = _surface_distances(result, reference)
+    return float(np.percentile(np.hstack([d1, d2]), 95))
+
+
+def _jc(result, reference):
+    result    = np.atleast_1d(result.astype(bool))
+    reference = np.atleast_1d(reference.astype(bool))
+    union = np.count_nonzero(result | reference)
+    return np.count_nonzero(result & reference) / float(union) if union else 0.0
+
+
+def _assd(result, reference):
+    result, reference = result.astype(bool), reference.astype(bool)
+    if not result.any() or not reference.any():
+        return 0.0
+    d1, d2 = _surface_distances(result, reference)
+    n = len(d1) + len(d2)
+    return float((d1.sum() + d2.sum()) / n) if n else 0.0
+
 
 def powerset(seq):
     """
@@ -146,24 +188,20 @@ class DiceLoss(nn.Module):
 def calculate_metric_percase(pred, gt):
     pred[pred > 0] = 1
     gt[gt > 0] = 1
-    if pred.sum() > 0 and gt.sum()>0:
-        dice = metric.binary.dc(pred, gt)
-        hd95 = metric.binary.hd95(pred, gt)
-        jaccard = metric.binary.jc(pred, gt)
-        asd = metric.binary.assd(pred, gt)
-        return dice, hd95, jaccard, asd
-    elif pred.sum() > 0 and gt.sum()==0:
+    if pred.sum() > 0 and gt.sum() > 0:
+        return _dc(pred, gt), _hd95(pred, gt), _jc(pred, gt), _assd(pred, gt)
+    elif pred.sum() > 0 and gt.sum() == 0:
         return 1, 0, 1, 0
     else:
         return 0, 0, 0, 0
 
+
 def calculate_dice_percase(pred, gt):
     pred[pred > 0] = 1
     gt[gt > 0] = 1
-    if pred.sum() > 0 and gt.sum()>0:
-        dice = metric.binary.dc(pred, gt)
-        return dice
-    elif pred.sum() > 0 and gt.sum()==0:
+    if pred.sum() > 0 and gt.sum() > 0:
+        return _dc(pred, gt)
+    elif pred.sum() > 0 and gt.sum() == 0:
         return 1
     else:
         return 0

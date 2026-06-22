@@ -22,11 +22,10 @@ import time
 import torch, gc
 import numpy as np
 from tqdm import tqdm
-from utils.utils import _dc as dc
 from scipy.ndimage import zoom
 
 from utils.utils import powerset
-from utils.utils import DiceLoss, calculate_dice_percase, val_single_volume
+from utils.utils import DiceLoss
 from utils.dataset_ACDC import ACDCdataset, RandomGenerator
 from test_ACDC import inference
 from lib.networks import MIST_CAM
@@ -48,7 +47,7 @@ parser = argparse.ArgumentParser(description='Searching longest common substring
                     'Written by Ilya Stepanov (c) 2013')
 parser.add_argument("--batch_size", type=int, default=12, help="batch size")
 parser.add_argument("--lr", type=float, default=0.0001, help="learning rate")
-parser.add_argument("--max_epochs", type=int, default=400)
+parser.add_argument("--max_epochs", type=int, default=300)
 parser.add_argument("--img_size", type=int, default=256)
 parser.add_argument("--save_path", default="./model_pth/data")
 parser.add_argument("--n_gpu", type=int, default=1)
@@ -158,49 +157,45 @@ optimizer = optim.AdamW(net.parameters(), lr=base_lr, weight_decay=0.0001)
 
 def val():
     logging.info("Validation ===>")
-    dc_sum=0
-    metric_list = 0.0
     net.eval()
+    dice_per_class = np.zeros(args.num_classes - 1)  # one entry per foreground class
     for i, val_sampled_batch in enumerate(valloader):
         val_image_batch, val_label_batch = val_sampled_batch["image"], val_sampled_batch["label"]
-
-        val_image_batch, val_label_batch = val_image_batch.squeeze(0).cpu().detach().numpy(), val_label_batch.squeeze(0).cpu().detach().numpy()
+        val_image_batch = val_image_batch.squeeze(0).cpu().detach().numpy()
+        val_label_batch = val_label_batch.squeeze(0).cpu().detach().numpy()
 
         x, y = val_image_batch.shape[0], val_image_batch.shape[1]
         if x != args.img_size or y != args.img_size:
-            val_image_batch = zoom(val_image_batch, (args.img_size / x, args.img_size / y), order=3) # not for double_maxvits
+            val_image_batch = zoom(val_image_batch, (args.img_size / x, args.img_size / y), order=3)
         val_image_batch = torch.from_numpy(val_image_batch).unsqueeze(0).unsqueeze(0).float().cuda()
-        
+
         P = net(val_image_batch)
-        #print(len(P))
-
-        val_outputs = 0.0
-        for idx in range(len(P)):
-            val_outputs += P[idx]
-        
-        val_outputs = torch.softmax(val_outputs, dim=1)
-
-        val_outputs = torch.argmax(val_outputs, dim=1).squeeze(0)
-        val_outputs = val_outputs.cpu().detach().numpy()
+        val_outputs = sum(P)
+        val_outputs = torch.argmax(torch.softmax(val_outputs, dim=1), dim=1).squeeze(0).cpu().detach().numpy()
         if x != args.img_size or y != args.img_size:
             val_outputs = zoom(val_outputs, (x / args.img_size, y / args.img_size), order=0)
-        else:
-            val_outputs = val_outputs
 
-        dc_sum+=dc(val_outputs,val_label_batch[:])
-    performance = dc_sum / len(valloader)
-    logging.info('Testing performance in val model: mean_dice : %f, best_dice : %f' % (performance, Best_dcs))
+        for cls in range(1, args.num_classes):
+            pred_cls = (val_outputs == cls)
+            gt_cls   = (val_label_batch == cls)
+            num = 2.0 * np.count_nonzero(pred_cls & gt_cls)
+            den = np.count_nonzero(pred_cls) + np.count_nonzero(gt_cls)
+            dice_per_class[cls - 1] += num / den if den > 0 else 0.0
 
-    print('Testing performance in val model: mean_dice : %f, best_dice : %f' % (performance, Best_dcs))
-    #print("val avg_dsc: %f" % (performance))
+    dice_per_class /= len(valloader)
+    performance = float(np.mean(dice_per_class))
+    logging.info('Val mean_dice: %f  per-class: %s  best: %f' % (
+        performance, np.round(dice_per_class, 4), Best_dcs))
+    print('Val mean_dice: %f  per-class: %s  best: %f' % (
+        performance, np.round(dice_per_class, 4), Best_dcs))
     return performance
 
 
 # In[ ]:
 
 
-l = [0, 1, 2, 3]
-ss = [x for x in powerset(l)] # for mutation
+l = [0, 1, 2]   # 3 outputs: P1, P2, P3 (decoder blocks 2-4 per paper Eq. 12)
+ss = [x for x in powerset(l)] # mutation: 2^3-1 = 7 non-empty subsets
 #ss = [[0],[1],[2],[3]] # for only four-stage loss, no mutation
 #print(ss)
 iter_num = 0
@@ -215,13 +210,12 @@ for epoch in tqdm(range(args.max_epochs)):
         
         P = net(image_batch)
         loss = 0.0
-        lc1, lc2 = 0.3, 0.7
-                  
+        lc1, lc2 = 0.7, 0.3  # paper Eq. 13: L = 0.7·CE + 0.3·Dice (γ=0.3 for Dice)
+
         for s in ss:
             iout = 0.0
             if(s==[]):
                 continue
-            #print(s)
             for idx in range(len(s)):
                 iout += P[s[idx]]
             loss_ce = ce_loss(iout, label_batch[:].long())

@@ -76,25 +76,21 @@ def trainer_synapse(args, model, snapshot_path):
     best_performance = 0.0
     #iterator = tqdm(range(max_epoch), ncols=70)
     
-    l = [0, 1, 2, 3]
-    ss = [x for x in powerset(l)]
-    #ss = [[0],[1],[2],[3]]
-    print(ss)
+    l = [0, 1, 2]   # 3 outputs: P1, P2, P3 (decoder blocks 2-4 per paper Eq. 12)
+    ss = [x for x in powerset(l)]  # mutation: 2^3-1 = 7 non-empty subsets
     for epoch_num in range(args.max_epochs):
-        
+
         for i_batch, sampled_batch in enumerate(trainloader):
             image_batch, label_batch = sampled_batch['image'], sampled_batch['label']
             image_batch, label_batch = image_batch.cuda(), label_batch.squeeze(1).cuda()
-            
-            P = model(image_batch)            
-           
+
+            P = model(image_batch)
+
             loss = 0.0
-            lc1, lc2 = 0.3, 0.7 #0.3, 0.7
-            #print(label_batch.shape)
-          
+            lc1, lc2 = 0.7, 0.3  # paper Eq. 13: L = 0.7·CE + 0.3·Dice (γ=0.3 for Dice)
+
             for s in ss:
                 iout = 0.0
-                #print(s)
                 if(s==[]):
                     continue
                 for idx in range(len(s)):
