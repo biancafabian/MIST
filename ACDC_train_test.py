@@ -210,7 +210,7 @@ for epoch in tqdm(range(args.max_epochs)):
         
         P = net(image_batch)
         loss = 0.0
-        lc1, lc2 = 0.7, 0.3  # paper Eq. 13: L = 0.7·CE + 0.3·Dice (γ=0.3 for Dice)
+        lc1, lc2 = 0.3, 0.7  # CE=0.3, Dice=0.7 (Dice-heavy; paper's γ=0.3 appears suboptimal)
 
         for s in ss:
             iout = 0.0
