@@ -116,11 +116,13 @@ train_dataset = ACDCdataset(args.root_dir, args.list_dir, split="train", transfo
                                    transforms.Compose(
                                    [RandomGenerator(output_size=[args.img_size, args.img_size])]))
 print("The length of train set is: {}".format(len(train_dataset)))
-train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True,
+                          num_workers=4, pin_memory=True, persistent_workers=True)
 db_val=ACDCdataset(base_dir=args.root_dir, list_dir=args.list_dir, split="valid")
-valloader=DataLoader(db_val, batch_size=1, shuffle=False)
+valloader=DataLoader(db_val, batch_size=1, shuffle=False,
+                     num_workers=2, pin_memory=True, persistent_workers=True)
 db_test =ACDCdataset(base_dir=args.volume_path,list_dir=args.list_dir, split="test")
-testloader = DataLoader(db_test, batch_size=1, shuffle=False)
+testloader = DataLoader(db_test, batch_size=1, shuffle=False, num_workers=2, pin_memory=True)
 
 if args.n_gpu > 1:
     net = nn.DataParallel(net)
@@ -170,9 +172,9 @@ def val():
         if x != args.img_size or y != args.img_size:
             val_image_batch = zoom(val_image_batch, (args.img_size / x, args.img_size / y), order=3) # not for double_maxvits
         val_image_batch = torch.from_numpy(val_image_batch).unsqueeze(0).unsqueeze(0).float().cuda()
-        
-        P = net(val_image_batch)
-        #print(len(P))
+
+        with torch.no_grad(), torch.cuda.amp.autocast():
+            P = net(val_image_batch)
 
         val_outputs = 0.0
         for idx in range(len(P)):
@@ -205,6 +207,7 @@ ss = [x for x in powerset(l)] # for mutation
 #print(ss)
 iter_num = 0
 best_state_dict=net.state_dict()
+scaler = torch.cuda.amp.GradScaler()
 for epoch in tqdm(range(args.max_epochs)):
     net.train()
     train_loss = 0
@@ -212,25 +215,26 @@ for epoch in tqdm(range(args.max_epochs)):
         image_batch, label_batch = sampled_batch["image"], sampled_batch["label"]
         image_batch, label_batch = image_batch.type(torch.FloatTensor), label_batch.type(torch.FloatTensor)
         image_batch, label_batch = image_batch.cuda(), label_batch.cuda()
-        
-        P = net(image_batch)
-        loss = 0.0
-        lc1, lc2 = 0.3, 0.7
-                  
-        for s in ss:
-            iout = 0.0
-            if(s==[]):
-                continue
-            #print(s)
-            for idx in range(len(s)):
-                iout += P[s[idx]]
-            loss_ce = ce_loss(iout, label_batch[:].long())
-            loss_dice = dice_loss(iout, label_batch, softmax=True)
-            loss += (lc1 * loss_ce + lc2 * loss_dice) 
-           
+
+        with torch.cuda.amp.autocast():
+            P = net(image_batch)
+            loss = 0.0
+            lc1, lc2 = 0.3, 0.7
+
+            for s in ss:
+                iout = 0.0
+                if(s==[]):
+                    continue
+                for idx in range(len(s)):
+                    iout += P[s[idx]]
+                loss_ce = ce_loss(iout, label_batch[:].long())
+                loss_dice = dice_loss(iout, label_batch, softmax=True)
+                loss += (lc1 * loss_ce + lc2 * loss_dice)
+
         optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
 
         lr_ = base_lr * (1.0 - iter_num / max_iterations) ** 0.9
         for param_group in optimizer.param_groups:
