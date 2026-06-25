@@ -22,7 +22,7 @@ def random_rot_flip(image, label):
 
 def random_rotate(image, label):
     angle = np.random.randint(-20, 20)
-    image = ndimage.rotate(image, angle, order=0, reshape=False)
+    image = ndimage.rotate(image, angle, order=3, reshape=False)
     label = ndimage.rotate(label, angle, order=0, reshape=False)
     return image, label
 
@@ -36,7 +36,7 @@ class RandomGenerator(object):
 
         if random.random() > 0.5:
             image, label = random_rot_flip(image, label)
-        elif random.random() > 0.5:
+        if random.random() > 0.5:
             image, label = random_rotate(image, label)
         x, y = image.shape
         if x != self.output_size[0] or y != self.output_size[1]:

@@ -232,8 +232,7 @@ for epoch in tqdm(range(args.max_epochs)):
         loss.backward()
         optimizer.step()
 
-        #lr_ = base_lr * (1.0 - iter_num / max_iterations) ** 0.9 # We did not use this
-        lr_ = base_lr
+        lr_ = base_lr * (1.0 - iter_num / max_iterations) ** 0.9
         for param_group in optimizer.param_groups:
             param_group['lr'] = lr_
 
