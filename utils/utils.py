@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from medpy import metric
+from medpy.metric.binary import dc as _dc, hd95 as _hd95, jc as _jc, assd as _assd
 from scipy.ndimage import zoom
 import seaborn as sns
 from PIL import Image 
