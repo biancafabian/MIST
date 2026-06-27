@@ -195,35 +195,62 @@ class Transformer(nn.Module):
 
 
 class Dilated_Conv(nn.Module):
-    """
-    Wide-Focus module.
-    """
+    """SWC: dilations 2 and 3, concatenated then projected (paper Eq. 5-6)."""
 
-    def __init__(self,
-                 in_channels,
-                 out_channels):
+    def __init__(self, in_channels, out_channels):
         super().__init__()
-        self.conv1=  nn.Conv2d(in_channels, out_channels, 3, 1, padding="same")
-        self.conv2 = nn.Conv2d(in_channels, out_channels, 3, 1, padding="same", dilation=2)
-        self.conv3 = nn.Conv2d(in_channels, out_channels, 3, 1, padding="same", dilation=3)
-        self.conv4 = nn.Conv2d(in_channels, out_channels, 3, 1, padding="same")
+        self.conv_d2 = nn.Conv2d(in_channels, out_channels, 3, 1, padding="same", dilation=2)
+        self.conv_d3 = nn.Conv2d(in_channels, out_channels, 3, 1, padding="same", dilation=3)
+        self.conv_out = nn.Conv2d(out_channels * 2, out_channels, 3, 1, padding="same")
 
     def forward(self, x):
-        x1 = self.conv1(x)
-        x1 = F.gelu(x1)
+        x1 = F.relu(self.conv_d2(x))
         x1 = F.dropout(x1, 0.1)
-        x2 = self.conv2(x)
-        x2 = F.gelu(x2)
+        x2 = F.relu(self.conv_d3(x))
         x2 = F.dropout(x2, 0.1)
-        x3=self.conv3(x)
-        x3=F.gelu(x3)
-        x3=F.dropout(x3, 0.1)
-        added = torch.add(x1, x2)
-        added = torch.add(added, x3)
-        x_out = self.conv4(added)
-        x_out = F.gelu(x_out)
+        x_out = self.conv_out(torch.cat([x1, x2], dim=1))
+        x_out = F.relu(x_out)
         x_out = F.dropout(x_out, 0.1)
         return x_out
+
+class BottleneckBlock(nn.Module):
+    """Doubles channels at same spatial resolution — no pooling, no upsampling (paper §3.1)."""
+    def __init__(self, in_channels, out_channels, att_heads, dpr):
+        super().__init__()
+        self.layernorm = nn.LayerNorm(in_channels, eps=1e-5)
+        self.conv1 = nn.Conv2d(in_channels, out_channels, 3, 1, padding="same")
+        self.conv2 = nn.Conv2d(out_channels, out_channels, 3, 1, padding="same")
+        self.trans = Transformer(out_channels, att_heads, dpr)
+
+    def forward(self, x):
+        x1 = x.permute(0, 2, 3, 1)
+        x1 = self.layernorm(x1)
+        x1 = x1.permute(0, 3, 1, 2)
+        x1 = F.relu(self.conv1(x1))
+        x1 = F.relu(self.conv2(x1))
+        x1 = F.dropout(x1, 0.3)
+        return self.trans(x1)
+
+
+class Bottleneck_decoder(nn.Module):
+    """First decoder block: merges bottleneck output with X4 skip at the same spatial size."""
+    def __init__(self, in_channels, out_channels, att_heads, dpr):
+        super().__init__()
+        self.layernorm = nn.LayerNorm(in_channels, eps=1e-5)
+        self.conv1 = nn.Conv2d(in_channels, out_channels, 3, 1, padding="same")
+        self.conv2 = nn.Conv2d(out_channels * 2, out_channels, 3, 1, padding="same")
+        self.trans = Transformer(out_channels, att_heads, dpr)
+
+    def forward(self, x, skip):
+        x1 = x.permute(0, 2, 3, 1)
+        x1 = self.layernorm(x1)
+        x1 = x1.permute(0, 3, 1, 2)
+        x1 = F.relu(self.conv1(x1))
+        x1 = torch.cat((skip, x1), axis=1)
+        x1 = F.relu(self.conv2(x1))
+        x1 = F.dropout(x1, 0.3)
+        return self.trans(x1)
+
 
 class Block_decoder(nn.Module):
     def __init__(self, in_channels, out_channels, att_heads, dpr):
@@ -373,8 +400,8 @@ class CAM(nn.Module):
         self.scale_img = nn.AvgPool2d(2, 2)
 
         # model
-        self.block_5 = Block_encoder_bottleneck("bottleneck", filters[3], filters[4], att_heads[4], dpr[4])
-        self.block_6 = Block_decoder(filters[4], filters[5], att_heads[5], dpr[5])
+        self.block_5 = BottleneckBlock(filters[3], filters[4], att_heads[4], dpr[4])
+        self.block_6 = Bottleneck_decoder(filters[4], filters[5], att_heads[5], dpr[5])
         self.block_7 = Block_decoder(filters[5], filters[6], att_heads[6], dpr[6])
         self.block_8 = Block_decoder(filters[6], filters[7], att_heads[7], dpr[7])
         self.block_9 = Block_decoder(filters[7], filters[8], att_heads[8], dpr[8])

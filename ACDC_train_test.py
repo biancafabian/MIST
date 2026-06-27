@@ -199,7 +199,7 @@ def val():
 # In[ ]:
 
 
-l = [0, 1, 2, 3]
+l = [0, 1, 2]
 ss = [x for x in powerset(l)] # for mutation
 #ss = [[0],[1],[2],[3]] # for only four-stage loss, no mutation
 #print(ss)

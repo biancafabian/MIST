@@ -66,9 +66,8 @@ class MIST_CAM(nn.Module):
         elif (self.model_scale == 'small'):
             self.channels = [768, 384, 192, 96]
 
-        # Prediction heads initialization
+        # Prediction heads initialization (block 1 output excluded per paper §3.3)
         self.decoder=CAM("SSS")
-        self.out_head1 = nn.Conv2d(self.channels[0], self.n_class, 1)
         self.out_head2 = nn.Conv2d(self.channels[1], self.n_class, 1)
         self.out_head3 = nn.Conv2d(self.channels[2], self.n_class, 1)
         self.out_head4 = nn.Conv2d(self.channels[3], self.n_class, 1)
@@ -85,23 +84,18 @@ class MIST_CAM(nn.Module):
         #f2 = self.backbone2(F.interpolate(x, size=self.img_size_s2, mode=self.interpolation))
         #print([f2[3].shape,f2[2].shape,f2[1].shape,f2[0].shape])
 
-        # decoder
-        x11_o, x12_o, x13_o, x14_o = self.decoder(f1[0], f1[1], f1[2], f1[3])
-        #print([x11_o.shape, x12_o.shape, x13_o.shape, x14_o.shape])
-        # print([p1.shape,p2.shape,p3.shape,p4.shape])
-        # prediction heads
-        p11 = self.out_head1(x11_o)
+        # decoder — block 1 output (_x11_o) excluded from supervision per paper §3.3
+        _x11_o, x12_o, x13_o, x14_o = self.decoder(f1[0], f1[1], f1[2], f1[3])
+
         p12 = self.out_head2(x12_o)
         p13 = self.out_head3(x13_o)
         p14 = self.out_head4(x14_o)
 
-        p11 = F.interpolate(p11, scale_factor=32, mode=self.interpolation)
         p12 = F.interpolate(p12, scale_factor=16, mode=self.interpolation)
         p13 = F.interpolate(p13, scale_factor=8, mode=self.interpolation)
         p14 = F.interpolate(p14, scale_factor=4, mode=self.interpolation)
 
-        # print([p1.shape, p2.shape, p3.shape, p4.shape])
-        return p11, p12, p13, p14
+        return p12, p13, p14
 
         
 if __name__ == '__main__':

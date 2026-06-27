@@ -76,7 +76,7 @@ def trainer_synapse(args, model, snapshot_path):
     best_performance = 0.0
     #iterator = tqdm(range(max_epoch), ncols=70)
     
-    l = [0, 1, 2, 3]
+    l = [0, 1, 2]
     ss = [x for x in powerset(l)]
     #ss = [[0],[1],[2],[3]]
     print(ss)
