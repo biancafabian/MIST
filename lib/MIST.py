@@ -379,7 +379,7 @@ class CAM(nn.Module):
         super().__init__()
 
         # attention heads and filters per block
-        att_heads = [2, 4, 6, 8, 10, 8, 6, 4, 2]
+        att_heads = [2, 4, 6, 8, 12, 8, 6, 4, 2]
         filters = [96, 192, 384, 768, 768*2, 768, 384, 192, 96]
 
         # number of blocks used in the model
