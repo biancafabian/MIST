@@ -147,9 +147,9 @@ class CBAM(nn.Module):
         self.spatial_attention = SpatialAttentionCBAM(kernel_size)
 
     def forward(self, x):
-        se_out = x * self.channel_attention(x)
-        sa_out = x * self.spatial_attention(x)
-        return torch.add(se_out, sa_out)
+        sa_out  = self.SE(x)                      # paper SA (Eq.10): SE block
+        sea_out = x * self.spatial_attention(x)   # paper SEA (Eq.9): spatial attention
+        return torch.add(sa_out, sea_out)
 
 class Transformer(nn.Module):
 
@@ -379,7 +379,7 @@ class CAM(nn.Module):
         super().__init__()
 
         # attention heads and filters per block
-        att_heads = [2, 4, 8, 12, 16, 12, 8, 4, 2]
+        att_heads = [2, 4, 6, 8, 10, 8, 6, 4, 2]
         filters = [96, 192, 384, 768, 768*2, 768, 384, 192, 96]
 
         # number of blocks used in the model
