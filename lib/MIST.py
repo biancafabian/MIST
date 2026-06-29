@@ -151,6 +151,22 @@ class CBAM(nn.Module):
         sa_out = x * self.spatial_attention(x)
         return torch.add(se_out, sa_out)
 
+
+class AttentionGate(nn.Module):
+    """Gated skip connection: uses the decoder state to score each spatial position
+    in the encoder skip, suppressing irrelevant regions before concatenation."""
+    def __init__(self, channels):
+        super().__init__()
+        mid = channels // 2
+        self.W_g = nn.Conv2d(channels, mid, kernel_size=1)
+        self.W_x = nn.Conv2d(channels, mid, kernel_size=1)
+        self.psi = nn.Conv2d(mid, 1, kernel_size=1)
+
+    def forward(self, skip, decoder):
+        alpha = torch.sigmoid(self.psi(F.relu(self.W_g(decoder) + self.W_x(skip))))
+        return skip * alpha
+
+
 class Transformer(nn.Module):
 
     def __init__(self,
@@ -262,6 +278,7 @@ class Block_decoder(nn.Module):
         self.conv3 = nn.Conv2d(out_channels, out_channels, 3, 1, padding="same")
         #self.convd1 = nn.Conv2d(out_channels, out_channels, 3, 1, padding="same", dilation=2)
         #self.convd2 = nn.Conv2d(out_channels, out_channels, 3, 1, padding="same", dilation=3)
+        self.attn_gate = AttentionGate(out_channels)
         self.trans = Transformer(out_channels, att_heads, dpr)
     def forward(self, x, skip):
         x1 = x.permute(0, 2, 3, 1)
@@ -269,6 +286,7 @@ class Block_decoder(nn.Module):
         x1 = x1.permute(0, 3, 1, 2)
         x1 = self.upsample(x1)
         x1 = F.relu(self.conv1(x1))
+        skip = self.attn_gate(skip, x1)
         x1 = torch.cat((skip, x1), axis=1)
         x1 = F.relu(self.conv2(x1))
         x1 = F.dropout(x1, 0.3)
@@ -287,6 +305,7 @@ class Block_decoder1(nn.Module):
         self.conv1 = nn.Conv2d(in_channels, out_channels, 3, 1, padding="same")
         self.conv2 = nn.Conv2d(out_channels * 2, out_channels, 3, 1, padding="same")
         self.conv3 = nn.Conv2d(out_channels, out_channels, 3, 1, padding="same")
+        self.attn_gate = AttentionGate(out_channels)
         self.trans = Transformer(out_channels, att_heads, dpr)
 
     def forward(self, x, skip):
@@ -295,6 +314,7 @@ class Block_decoder1(nn.Module):
         x1 = x1.permute(0, 3, 1, 2)
         x1 = F.interpolate(x1, scale_factor=2, mode='bilinear')
         x1 = F.relu(self.conv1(x1))
+        skip = self.attn_gate(skip, x1)
         x1 = torch.cat((skip, x1), axis=1)
         x1 = F.relu(self.conv2(x1))
         x1 = F.relu(self.conv3(x1))

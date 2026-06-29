@@ -1,9 +1,9 @@
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
-from medpy import metric
-from scipy.ndimage import zoom
+from scipy.ndimage import zoom, binary_erosion, distance_transform_edt
 import seaborn as sns
 from PIL import Image 
 import matplotlib.pyplot as plt
@@ -143,16 +143,75 @@ class DiceLoss(nn.Module):
         return loss / self.n_classes
 
 
+def _dc(result, reference):
+    result = np.atleast_1d(result.astype(bool))
+    reference = np.atleast_1d(reference.astype(bool))
+    intersection = np.count_nonzero(result & reference)
+    denom = np.count_nonzero(result) + np.count_nonzero(reference)
+    return 2.0 * intersection / float(denom) if denom else 0.0
+
+def _jc(result, reference):
+    result = np.atleast_1d(result.astype(bool))
+    reference = np.atleast_1d(reference.astype(bool))
+    union = np.count_nonzero(result | reference)
+    return np.count_nonzero(result & reference) / float(union) if union else 0.0
+
+def _surface_distances(result, reference):
+    result_border    = result    ^ binary_erosion(result)
+    reference_border = reference ^ binary_erosion(reference)
+    dt_ref    = distance_transform_edt(~reference)
+    dt_result = distance_transform_edt(~result)
+    return dt_ref[result_border], dt_result[reference_border]
+
+def _hd95(result, reference):
+    result    = np.atleast_1d(result.astype(bool))
+    reference = np.atleast_1d(reference.astype(bool))
+    if not result.any() or not reference.any():
+        return 0.0
+    d1, d2 = _surface_distances(result, reference)
+    return float(np.percentile(np.hstack([d1, d2]), 95))
+
+def _assd(result, reference):
+    result    = np.atleast_1d(result.astype(bool))
+    reference = np.atleast_1d(reference.astype(bool))
+    if not result.any() or not reference.any():
+        return 0.0
+    d1, d2 = _surface_distances(result, reference)
+    n = len(d1) + len(d2)
+    return float((d1.sum() + d2.sum()) / n) if n else 0.0
+
+
+class BoundaryLoss(nn.Module):
+    def __init__(self, n_classes, w=3):
+        super().__init__()
+        self.n_classes = n_classes
+        self.w = w
+
+    def _boundary_weights(self, label):
+        weight_map = torch.ones_like(label, dtype=torch.float32)
+        for c in range(self.n_classes):
+            gt_c = (label == c).float().unsqueeze(1)
+            eroded = (F.avg_pool2d(gt_c, kernel_size=3, stride=1, padding=1) > 0.999).float()
+            boundary_c = (gt_c - eroded).squeeze(1)
+            weight_map = weight_map + (self.w - 1) * boundary_c
+        return weight_map
+
+    def forward(self, pred, label):
+        weight_map = self._boundary_weights(label)
+        ce = F.cross_entropy(pred, label, reduction='none')
+        return (ce * weight_map).mean()
+
+
 def calculate_metric_percase(pred, gt):
     pred[pred > 0] = 1
     gt[gt > 0] = 1
-    if pred.sum() > 0 and gt.sum()>0:
-        dice = metric.binary.dc(pred, gt)
-        hd95 = metric.binary.hd95(pred, gt)
-        jaccard = metric.binary.jc(pred, gt)
-        asd = metric.binary.assd(pred, gt)
+    if pred.sum() > 0 and gt.sum() > 0:
+        dice    = _dc(pred, gt)
+        hd95    = _hd95(pred, gt)
+        jaccard = _jc(pred, gt)
+        asd     = _assd(pred, gt)
         return dice, hd95, jaccard, asd
-    elif pred.sum() > 0 and gt.sum()==0:
+    elif pred.sum() > 0 and gt.sum() == 0:
         return 1, 0, 1, 0
     else:
         return 0, 0, 0, 0
@@ -160,10 +219,9 @@ def calculate_metric_percase(pred, gt):
 def calculate_dice_percase(pred, gt):
     pred[pred > 0] = 1
     gt[gt > 0] = 1
-    if pred.sum() > 0 and gt.sum()>0:
-        dice = metric.binary.dc(pred, gt)
-        return dice
-    elif pred.sum() > 0 and gt.sum()==0:
+    if pred.sum() > 0 and gt.sum() > 0:
+        return _dc(pred, gt)
+    elif pred.sum() > 0 and gt.sum() == 0:
         return 1
     else:
         return 0

@@ -26,7 +26,7 @@ from utils.utils import _dc as dc
 from scipy.ndimage import zoom
 
 from utils.utils import powerset
-from utils.utils import DiceLoss, calculate_dice_percase, val_single_volume
+from utils.utils import DiceLoss, BoundaryLoss, calculate_dice_percase, val_single_volume
 from utils.dataset_ACDC import ACDCdataset, RandomGenerator
 from test_ACDC import inference
 from lib.networks import MIST_CAM
@@ -133,6 +133,7 @@ net = net.cuda()
 net.train()
 ce_loss = CrossEntropyLoss()
 dice_loss = DiceLoss(args.num_classes)
+boundary_loss = BoundaryLoss(args.num_classes, w=3)
 #save_interval = args.n_skip
 
 # iterator = tqdm(range(0, args.max_epochs), ncols=70)
@@ -187,7 +188,11 @@ def val():
         else:
             val_outputs = val_outputs
 
-        dc_sum+=dc(val_outputs,val_label_batch[:])
+        per_class_dc = [
+            dc(val_outputs == c, val_label_batch == c)
+            for c in range(1, args.num_classes)
+        ]
+        dc_sum += np.mean(per_class_dc)
     performance = dc_sum / len(valloader)
     logging.info('Testing performance in val model: mean_dice : %f, best_dice : %f' % (performance, Best_dcs))
 
@@ -215,8 +220,8 @@ for epoch in tqdm(range(args.max_epochs)):
         
         P = net(image_batch)
         loss = 0.0
-        lc1, lc2 = 0.3, 0.7
-                  
+        lc1, lc2, lc3 = 0.7, 0.3, 0.2
+
         for s in ss:
             iout = 0.0
             if(s==[]):
@@ -224,9 +229,10 @@ for epoch in tqdm(range(args.max_epochs)):
             #print(s)
             for idx in range(len(s)):
                 iout += P[s[idx]]
-            loss_ce = ce_loss(iout, label_batch[:].long())
             loss_dice = dice_loss(iout, label_batch, softmax=True)
-            loss += (lc1 * loss_ce + lc2 * loss_dice) 
+            loss_ce   = ce_loss(iout, label_batch[:].long())
+            loss_bnd  = boundary_loss(iout, label_batch[:].long())
+            loss += (lc1 * loss_dice + lc2 * loss_ce + lc3 * loss_bnd)
            
         optimizer.zero_grad()
         loss.backward()
