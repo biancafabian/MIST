@@ -50,13 +50,6 @@ class MIST_CAM(nn.Module):
         self.decoder_aggregation = decoder_aggregation
         self.interpolation = interpolation
 
-        # conv block to convert single channel to 3 channels
-        self.conv = nn.Sequential(
-            nn.Conv2d(1, 3, kernel_size=1),
-            nn.BatchNorm2d(3),
-            nn.ReLU(inplace=True)
-        )
-
         # backbone network initialization with pretrained weight
         self.backbone1 = load_pretrained_weights(self.img_size_s1[0], self.model_scale)
         #self.backbone2 = load_pretrained_weights(self.img_size_s2[0], self.model_scale)
@@ -74,9 +67,9 @@ class MIST_CAM(nn.Module):
 
     def forward(self, x):
 
-        # if grayscale input, convert to 3 channels
+        # if grayscale input, replicate to 3 channels
         if x.size()[1] == 1:
-            x = self.conv(x)
+            x = x.repeat(1, 3, 1, 1)
         # transformer backbone as encoder
         f1 = self.backbone1(F.interpolate(x, size=self.img_size_s1, mode=self.interpolation))
         #print([f1[3].shape,f1[2].shape,f1[1].shape,f1[0].shape])
