@@ -323,6 +323,59 @@ class Block_decoder1(nn.Module):
         return out
 
 
+class Block_decoder_noAG(nn.Module):
+    """Decoder block without attention gate — plain skip concatenation."""
+    def __init__(self, in_channels, out_channels, att_heads, dpr):
+        super().__init__()
+        self.layernorm = nn.LayerNorm(in_channels, eps=1e-5)
+        self.upsample = nn.Upsample(scale_factor=2)
+        self.conv1 = nn.Conv2d(in_channels, out_channels, 3, 1, padding="same")
+        self.conv2 = nn.Conv2d(out_channels * 2, out_channels, 3, 1, padding="same")
+        self.trans = Transformer(out_channels, att_heads, dpr)
+
+    def forward(self, x, skip):
+        x1 = x.permute(0, 2, 3, 1)
+        x1 = self.layernorm(x1)
+        x1 = x1.permute(0, 3, 1, 2)
+        x1 = self.upsample(x1)
+        x1 = F.relu(self.conv1(x1))
+        x1 = torch.cat((skip, x1), axis=1)
+        x1 = F.relu(self.conv2(x1))
+        x1 = F.dropout(x1, 0.3)
+        return self.trans(x1)
+
+
+class CAM_noAG(nn.Module):
+    """CAM decoder with plain skip connections (no attention gates)."""
+    def __init__(self, args):
+        super().__init__()
+
+        att_heads = [2, 4, 8, 12, 16, 12, 8, 4, 2]
+        filters = [96, 192, 384, 768, 768*2, 768, 384, 192, 96]
+
+        blocks = len(filters)
+        stochastic_depth_rate = 1.0
+        dpr = [x for x in np.linspace(0, stochastic_depth_rate, blocks)]
+
+        self.block_5 = BottleneckBlock(filters[3], filters[4], att_heads[4], dpr[4])
+        self.block_6 = Bottleneck_decoder(filters[4], filters[5], att_heads[5], dpr[5])
+        self.block_7 = Block_decoder_noAG(filters[5], filters[6], att_heads[6], dpr[6])
+        self.block_8 = Block_decoder_noAG(filters[6], filters[7], att_heads[7], dpr[7])
+        self.block_9 = Block_decoder_noAG(filters[7], filters[8], att_heads[8], dpr[8])
+
+    def forward(self, skip1, skip2, skip3, skip4):
+        x = self.block_5(skip4)
+        x = self.block_6(x, skip4)
+        out4 = x
+        x = self.block_7(x, skip3)
+        out3 = x
+        x = self.block_8(x, skip2)
+        out2 = x
+        x = self.block_9(x, skip1)
+        out1 = x
+        return out4, out3, out2, out1
+
+
 class DS_out(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
