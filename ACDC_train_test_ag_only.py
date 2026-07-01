@@ -151,6 +151,7 @@ max_iterations = args.max_epochs * len(train_loader)
 base_lr = args.lr
 optimizer = optim.AdamW(net.parameters(), lr=base_lr, weight_decay=0.0001)
 #optimizer = optim.SGD(net.parameters(), lr=base_lr, momentum=0.9, weight_decay=0.0001)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.max_epochs, eta_min=1e-6)
 
 
 # In[7]:
@@ -236,10 +237,7 @@ for epoch in tqdm(range(args.max_epochs)):
         loss.backward()
         optimizer.step()
 
-        #lr_ = base_lr * (1.0 - iter_num / max_iterations) ** 0.9 # We did not use this
-        lr_ = base_lr
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = lr_
+        lr_ = optimizer.param_groups[0]['lr']
 
         iter_num = iter_num + 1
         if iter_num%50 == 0:
@@ -255,6 +253,7 @@ for epoch in tqdm(range(args.max_epochs)):
 
 
     avg_dcs = val()
+    scheduler.step()
 
     if avg_dcs > Best_dcs:
         #save_model_path = os.path.join(snapshot_path, 'best.pth')

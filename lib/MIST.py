@@ -153,18 +153,27 @@ class CBAM(nn.Module):
 
 
 class AttentionGate(nn.Module):
-    """Gated skip connection: uses the decoder state to score each spatial position
-    in the encoder skip, suppressing irrelevant regions before concatenation."""
+    """Gated skip connection: spatial + channel attention on the encoder skip."""
     def __init__(self, channels):
         super().__init__()
         mid = channels // 2
-        self.W_g = nn.Conv2d(channels, mid, kernel_size=1)
-        self.W_x = nn.Conv2d(channels, mid, kernel_size=1)
+        self.W_g = nn.Sequential(nn.Conv2d(channels, mid, kernel_size=1), nn.BatchNorm2d(mid))
+        self.W_x = nn.Sequential(nn.Conv2d(channels, mid, kernel_size=1), nn.BatchNorm2d(mid))
         self.psi = nn.Conv2d(mid, 1, kernel_size=1)
+        # SE-style channel gate on the skip features
+        self.channel_gate = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Flatten(),
+            nn.Linear(channels, channels // 4),
+            nn.ReLU(inplace=True),
+            nn.Linear(channels // 4, channels),
+            nn.Sigmoid()
+        )
 
     def forward(self, skip, decoder):
         alpha = torch.sigmoid(self.psi(F.relu(self.W_g(decoder) + self.W_x(skip))))
-        return skip * alpha
+        beta = self.channel_gate(skip).view(skip.shape[0], skip.shape[1], 1, 1)
+        return skip * alpha * beta
 
 
 class Transformer(nn.Module):
