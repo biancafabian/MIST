@@ -104,9 +104,10 @@ def one_hot_encoder(input_tensor,dataset,n_classes = None):
         return output_tensor.float()    
 
 class DiceLoss(nn.Module):
-    def __init__(self, n_classes):
+    def __init__(self, n_classes, include_background=True):
         super(DiceLoss, self).__init__()
         self.n_classes = n_classes
+        self.include_background = include_background
 
     def _one_hot_encoder(self, input_tensor):
         tensor_list = []
@@ -134,13 +135,14 @@ class DiceLoss(nn.Module):
             weight = [1] * self.n_classes
         #print(inputs)
         assert inputs.size() == target.size(), 'predict {} & target {} shape do not match'.format(inputs.size(), target.size())
+        class_range = range(0, self.n_classes) if self.include_background else range(1, self.n_classes)
         class_wise_dice = []
         loss = 0.0
-        for i in range(0, self.n_classes):
+        for i in class_range:
             dice = self._dice_loss(inputs[:, i], target[:, i])
             class_wise_dice.append(1.0 - dice.item())
             loss += dice * weight[i]
-        return loss / self.n_classes
+        return loss / len(class_range)
 
 
 def calculate_metric_percase(pred, gt):
