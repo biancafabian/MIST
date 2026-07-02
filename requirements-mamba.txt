@@ -1,0 +1,12 @@
+# Extra/updated dependencies for the mamba-from-best-baseline branch.
+# Install on top of (or instead of) the base requirements listed in README.md
+# when running on a Linux/CUDA environment (e.g. RunPod).
+#
+# mamba-ssm ships prebuilt wheels only for modern torch/CUDA combinations,
+# which conflicts with the torch==1.11.0+cu113 pin used by the baseline.
+# Confirm exact versions against the CUDA image on the pod before installing.
+torch>=2.1
+torchvision>=0.16
+causal-conv1d>=1.2.0
+mamba-ssm
+einops

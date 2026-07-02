@@ -4,6 +4,8 @@ import numpy as np
 import torch.nn.functional as F
 import torch.nn as nn
 
+from .mamba_block import DirectionalMambaSSM
+
 
 
 class Attention(nn.Module):
@@ -163,18 +165,22 @@ class Transformer(nn.Module):
                  padding_q="same",
                  padding_kv="same",
                  stride_kv=1,
-                 stride_q=1):
+                 stride_q=1,
+                 use_mamba=False):
         super().__init__()
 
-        self.attention_output = Attention(channels=out_channels,
-                                          num_heads=num_heads,
-                                          proj_drop=proj_drop,
-                                          padding_q=padding_q,
-                                          padding_kv=padding_kv,
-                                          stride_kv=stride_kv,
-                                          stride_q=stride_q,
-                                          attention_bias=attention_bias,
-                                          )
+        if use_mamba:
+            self.attention_output = DirectionalMambaSSM(channels=out_channels, proj_drop=proj_drop)
+        else:
+            self.attention_output = Attention(channels=out_channels,
+                                              num_heads=num_heads,
+                                              proj_drop=proj_drop,
+                                              padding_q=padding_q,
+                                              padding_kv=padding_kv,
+                                              stride_kv=stride_kv,
+                                              stride_q=stride_q,
+                                              attention_bias=attention_bias,
+                                              )
 
         self.conv1 = nn.Conv2d(out_channels, out_channels, 3, 1, padding="same")
         self.layernorm = nn.LayerNorm(self.conv1.out_channels, eps=1e-5)
@@ -253,7 +259,7 @@ class Bottleneck_decoder(nn.Module):
 
 
 class Block_decoder(nn.Module):
-    def __init__(self, in_channels, out_channels, att_heads, dpr):
+    def __init__(self, in_channels, out_channels, att_heads, dpr, use_mamba=False):
         super().__init__()
         self.layernorm = nn.LayerNorm(in_channels, eps=1e-5)
         self.upsample = nn.Upsample(scale_factor=2)
@@ -262,7 +268,7 @@ class Block_decoder(nn.Module):
         self.conv3 = nn.Conv2d(out_channels, out_channels, 3, 1, padding="same")
         #self.convd1 = nn.Conv2d(out_channels, out_channels, 3, 1, padding="same", dilation=2)
         #self.convd2 = nn.Conv2d(out_channels, out_channels, 3, 1, padding="same", dilation=3)
-        self.trans = Transformer(out_channels, att_heads, dpr)
+        self.trans = Transformer(out_channels, att_heads, dpr, use_mamba=use_mamba)
     def forward(self, x, skip):
         x1 = x.permute(0, 2, 3, 1)
         x1 = self.layernorm(x1)
@@ -402,9 +408,9 @@ class CAM(nn.Module):
         # model
         self.block_5 = BottleneckBlock(filters[3], filters[4], att_heads[4], dpr[4])
         self.block_6 = Bottleneck_decoder(filters[4], filters[5], att_heads[5], dpr[5])
-        self.block_7 = Block_decoder(filters[5], filters[6], att_heads[6], dpr[6])
-        self.block_8 = Block_decoder(filters[6], filters[7], att_heads[7], dpr[7])
-        self.block_9 = Block_decoder(filters[7], filters[8], att_heads[8], dpr[8])
+        self.block_7 = Block_decoder(filters[5], filters[6], att_heads[6], dpr[6], use_mamba=True)
+        self.block_8 = Block_decoder(filters[6], filters[7], att_heads[7], dpr[7], use_mamba=True)
+        self.block_9 = Block_decoder(filters[7], filters[8], att_heads[8], dpr[8], use_mamba=True)
 
     def forward(self, skip1, skip2, skip3, skip4):
         x = self.block_5(skip4)
