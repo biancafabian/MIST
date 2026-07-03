@@ -154,13 +154,26 @@ class CBAM(nn.Module):
 
 class AttentionGate(nn.Module):
     """Gated skip connection: uses the decoder state to score each spatial position
-    in the encoder skip, suppressing irrelevant regions before concatenation."""
+    in the encoder skip, suppressing irrelevant regions before concatenation.
+
+    BatchNorm after each 1x1 conv (as in Oktay et al., Attention U-Net) stabilizes
+    the additive W_g+W_x combination before the sigmoid, so the gate doesn't
+    saturate to a constant pass-through/blackout early in training."""
     def __init__(self, channels):
         super().__init__()
         mid = channels // 2
-        self.W_g = nn.Conv2d(channels, mid, kernel_size=1)
-        self.W_x = nn.Conv2d(channels, mid, kernel_size=1)
-        self.psi = nn.Conv2d(mid, 1, kernel_size=1)
+        self.W_g = nn.Sequential(
+            nn.Conv2d(channels, mid, kernel_size=1),
+            nn.BatchNorm2d(mid),
+        )
+        self.W_x = nn.Sequential(
+            nn.Conv2d(channels, mid, kernel_size=1),
+            nn.BatchNorm2d(mid),
+        )
+        self.psi = nn.Sequential(
+            nn.Conv2d(mid, 1, kernel_size=1),
+            nn.BatchNorm2d(1),
+        )
 
     def forward(self, skip, decoder):
         alpha = torch.sigmoid(self.psi(F.relu(self.W_g(decoder) + self.W_x(skip))))
