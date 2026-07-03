@@ -136,11 +136,11 @@ class DiceLoss(nn.Module):
         assert inputs.size() == target.size(), 'predict {} & target {} shape do not match'.format(inputs.size(), target.size())
         class_wise_dice = []
         loss = 0.0
-        for i in range(0, self.n_classes):
+        for i in range(1, self.n_classes):
             dice = self._dice_loss(inputs[:, i], target[:, i])
             class_wise_dice.append(1.0 - dice.item())
             loss += dice * weight[i]
-        return loss / self.n_classes
+        return loss / (self.n_classes - 1)
 
 
 def _dc(result, reference):
