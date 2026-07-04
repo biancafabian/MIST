@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from medpy import metric
-from scipy.ndimage import zoom, label as ndlabel
+from scipy.ndimage import zoom, label as ndlabel, distance_transform_edt
 import seaborn as sns
 from PIL import Image 
 import matplotlib.pyplot as plt
@@ -141,6 +141,46 @@ class DiceLoss(nn.Module):
             class_wise_dice.append(1.0 - dice.item())
             loss += dice * weight[i]
         return loss / self.n_classes
+
+
+class BoundaryLoss(nn.Module):
+    """Distance-map boundary loss (Kervadec et al., 2019).
+
+    Precomputes a signed distance map per class from the GT mask (negative
+    inside the object, positive outside, magnitude = distance to the
+    boundary) and weights the predicted softmax probabilities by it. Unlike
+    Dice/CE, a false positive far from the true boundary is penalized more
+    than one right at the edge — it directly targets the "wrong region
+    entirely" failure mode rather than just boundary sharpness.
+
+    Has no lower bound of 0 like Dice/CE do, so it must be combined with a
+    region loss at a small, ramped-up weight (start near 0, increase over
+    the first N epochs) — using it alone or at full strength from epoch 0
+    is known to destabilize training.
+    """
+    def __init__(self, n_classes):
+        super().__init__()
+        self.n_classes = n_classes
+
+    @torch.no_grad()
+    def _dist_maps(self, label):
+        label_np = label.detach().cpu().numpy().astype(np.int64)
+        b_sz, h, w = label_np.shape
+        maps = np.zeros((b_sz, self.n_classes, h, w), dtype=np.float32)
+        for b in range(b_sz):
+            for c in range(self.n_classes):
+                posmask = (label_np[b] == c)
+                if posmask.any() and not posmask.all():
+                    maps[b, c] = distance_transform_edt(~posmask) - distance_transform_edt(posmask)
+                elif posmask.all():
+                    maps[b, c] = -distance_transform_edt(posmask)
+                # class absent everywhere in this slice -> leave at 0, no penalty either way
+        return torch.from_numpy(maps)
+
+    def forward(self, logits, label):
+        probs = torch.softmax(logits, dim=1)
+        dist_maps = self._dist_maps(label.long()).to(logits.device)
+        return (probs * dist_maps).mean()
 
 
 def keep_largest_component(volume, classes):
