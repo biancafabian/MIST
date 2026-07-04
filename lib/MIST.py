@@ -232,6 +232,31 @@ class BottleneckBlock(nn.Module):
         return self.trans(x1)
 
 
+class AttentionGate(nn.Module):
+    """Attention gate for skip connections (Oktay et al., Attention U-Net, 2018).
+
+    Gates the encoder skip features using the decoder's (coarser) gating signal,
+    so the network learns to suppress irrelevant background before fusion —
+    helps recover small/thin structures (e.g. RV) in cardiac MRI segmentation.
+    """
+    def __init__(self, gate_channels, skip_channels, inter_channels=None):
+        super().__init__()
+        if inter_channels is None:
+            inter_channels = max(skip_channels // 2, 1)
+        self.theta_g = nn.Conv2d(gate_channels, inter_channels, kernel_size=1, bias=True)
+        self.phi_x = nn.Conv2d(skip_channels, inter_channels, kernel_size=1, bias=True)
+        self.psi = nn.Conv2d(inter_channels, 1, kernel_size=1, bias=True)
+        self.bn = nn.BatchNorm2d(1)
+
+    def forward(self, g, x):
+        g1 = self.theta_g(g)
+        x1 = self.phi_x(x)
+        if g1.shape[-2:] != x1.shape[-2:]:
+            g1 = F.interpolate(g1, size=x1.shape[-2:], mode='bilinear', align_corners=False)
+        alpha = torch.sigmoid(self.bn(self.psi(F.relu(g1 + x1))))
+        return x * alpha
+
+
 class Bottleneck_decoder(nn.Module):
     """First decoder block: merges bottleneck output with X4 skip at the same spatial size."""
     def __init__(self, in_channels, out_channels, att_heads, dpr):
@@ -239,6 +264,7 @@ class Bottleneck_decoder(nn.Module):
         self.layernorm = nn.LayerNorm(in_channels, eps=1e-5)
         self.conv1 = nn.Conv2d(in_channels, out_channels, 3, 1, padding="same")
         self.conv2 = nn.Conv2d(out_channels * 2, out_channels, 3, 1, padding="same")
+        self.attn_gate = AttentionGate(gate_channels=out_channels, skip_channels=out_channels)
         self.trans = Transformer(out_channels, att_heads, dpr)
 
     def forward(self, x, skip):
@@ -246,6 +272,7 @@ class Bottleneck_decoder(nn.Module):
         x1 = self.layernorm(x1)
         x1 = x1.permute(0, 3, 1, 2)
         x1 = F.relu(self.conv1(x1))
+        skip = self.attn_gate(x1, skip)
         x1 = torch.cat((skip, x1), axis=1)
         x1 = F.relu(self.conv2(x1))
         x1 = F.dropout(x1, 0.3)
@@ -262,6 +289,7 @@ class Block_decoder(nn.Module):
         self.conv3 = nn.Conv2d(out_channels, out_channels, 3, 1, padding="same")
         #self.convd1 = nn.Conv2d(out_channels, out_channels, 3, 1, padding="same", dilation=2)
         #self.convd2 = nn.Conv2d(out_channels, out_channels, 3, 1, padding="same", dilation=3)
+        self.attn_gate = AttentionGate(gate_channels=out_channels, skip_channels=out_channels)
         self.trans = Transformer(out_channels, att_heads, dpr)
     def forward(self, x, skip):
         x1 = x.permute(0, 2, 3, 1)
@@ -269,6 +297,7 @@ class Block_decoder(nn.Module):
         x1 = x1.permute(0, 3, 1, 2)
         x1 = self.upsample(x1)
         x1 = F.relu(self.conv1(x1))
+        skip = self.attn_gate(x1, skip)
         x1 = torch.cat((skip, x1), axis=1)
         x1 = F.relu(self.conv2(x1))
         x1 = F.dropout(x1, 0.3)
