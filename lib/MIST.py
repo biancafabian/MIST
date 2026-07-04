@@ -248,6 +248,16 @@ class AttentionGate(nn.Module):
         self.psi = nn.Conv2d(inter_channels, 1, kernel_size=1, bias=True)
         self.bn = nn.BatchNorm2d(1)
 
+        # Identity/pass-through init: zero out psi so its output (and thus the BN
+        # input) is a constant 0 regardless of g/x, then push the BN bias positive
+        # so sigmoid(...) starts near 1. Without this, the gate starts as a random
+        # ~0.5 mask over every skip connection and actively degrades the pretrained
+        # encoder->decoder signal before it has learned anything useful.
+        nn.init.zeros_(self.psi.weight)
+        nn.init.zeros_(self.psi.bias)
+        nn.init.constant_(self.bn.weight, 1.0)
+        nn.init.constant_(self.bn.bias, 4.0)
+
     def forward(self, g, x):
         g1 = self.theta_g(g)
         x1 = self.phi_x(x)

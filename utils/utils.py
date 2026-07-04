@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from medpy import metric
-from scipy.ndimage import zoom
+from scipy.ndimage import zoom, label as ndlabel
 import seaborn as sns
 from PIL import Image 
 import matplotlib.pyplot as plt
@@ -143,6 +143,25 @@ class DiceLoss(nn.Module):
         return loss / self.n_classes
 
 
+def keep_largest_component(volume, classes):
+    """Keep only the largest connected component per foreground class over the
+    whole 3D volume, dropping spurious islands the network predicts elsewhere.
+    Test-time only post-processing — no retraining needed."""
+    cleaned = np.zeros_like(volume)
+    for c in range(1, classes):
+        mask = (volume == c)
+        if not mask.any():
+            continue
+        labeled, n = ndlabel(mask)
+        if n <= 1:
+            cleaned[mask] = c
+            continue
+        sizes = np.bincount(labeled.ravel())
+        sizes[0] = 0
+        cleaned[labeled == sizes.argmax()] = c
+    return cleaned
+
+
 def calculate_metric_percase(pred, gt):
     pred[pred > 0] = 1
     gt[gt > 0] = 1
@@ -224,6 +243,7 @@ def test_single_volume(image, label, net, classes, patch_size=[256, 256], test_s
             prediction = out.cpu().detach().numpy()
             if x != patch_size[0] or y != patch_size[1]:
                 prediction = zoom(prediction, (x / patch_size[0], y / patch_size[1]), order=0)
+    prediction = keep_largest_component(prediction, classes)
     metric_list = []
 
     for i in range(1, classes):
