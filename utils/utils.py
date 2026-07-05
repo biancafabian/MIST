@@ -183,6 +183,20 @@ class BoundaryLoss(nn.Module):
         return (probs * dist_maps).mean()
 
 
+def predict_tta(net, t):
+    """Flip test-time augmentation: average softmax over identity + H-flip + V-flip.
+    t: (1, 1, H, W) input tensor. Returns (1, C, H, W) averaged probabilities."""
+    probs = []
+    for dims in ([], [2], [3]):
+        inp = torch.flip(t, dims) if dims else t
+        P = net(inp)
+        p = torch.softmax(sum(P), dim=1)
+        if dims:
+            p = torch.flip(p, dims)
+        probs.append(p)
+    return torch.stack(probs).mean(0)
+
+
 def keep_largest_component(volume, classes):
     """Keep only the largest connected component per foreground class over the
     whole 3D volume, dropping spurious islands the network predicts elsewhere.
