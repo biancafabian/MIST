@@ -35,17 +35,18 @@ class DirectionalMambaSSM(nn.Module):
         seq_col = x.transpose(2, 3).flatten(2).transpose(1, 2)     # top->bottom, left->right
 
         directions = [seq_row, seq_row.flip(dims=[1]), seq_col, seq_col.flip(dims=[1])]
+        batched = torch.cat(directions, dim=0).contiguous()         # (4B, L, C) -- single core call
 
-        outs = []
-        for i, seq in enumerate(directions):
-            y = self.core(seq.contiguous())
+        y = self.core(batched)
+
+        outs = list(y.chunk(4, dim=0))
+        for i in range(len(outs)):
             if i % 2 == 1:
-                y = y.flip(dims=[1])
+                outs[i] = outs[i].flip(dims=[1])
             if i < 2:
-                y = y.transpose(1, 2).reshape(B, C, H, W)
+                outs[i] = outs[i].transpose(1, 2).reshape(B, C, H, W)
             else:
-                y = y.transpose(1, 2).reshape(B, C, W, H).transpose(2, 3)
-            outs.append(y)
+                outs[i] = outs[i].transpose(1, 2).reshape(B, C, W, H).transpose(2, 3)
 
         out = torch.stack(outs, dim=0).mean(dim=0)
         out = F.dropout(out, self.proj_drop)
