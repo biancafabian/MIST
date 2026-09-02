@@ -1,6 +1,7 @@
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 from medpy import metric
 from scipy.ndimage import zoom
@@ -143,6 +144,27 @@ class DiceLoss(nn.Module):
             class_wise_dice.append(1.0 - dice.item())
             loss += dice * weight[i]
         return loss / len(class_range)
+
+
+class BoundaryLoss(nn.Module):
+    def __init__(self, n_classes, w=3):
+        super().__init__()
+        self.n_classes = n_classes
+        self.w = w
+
+    def _boundary_weights(self, label):
+        weight_map = torch.ones_like(label, dtype=torch.float32)
+        for c in range(self.n_classes):
+            gt_c = (label == c).float().unsqueeze(1)
+            eroded = (F.avg_pool2d(gt_c, kernel_size=3, stride=1, padding=1) > 0.999).float()
+            boundary_c = (gt_c - eroded).squeeze(1)
+            weight_map = weight_map + (self.w - 1) * boundary_c
+        return weight_map
+
+    def forward(self, pred, label):
+        weight_map = self._boundary_weights(label)
+        ce = F.cross_entropy(pred, label, reduction='none')
+        return (ce * weight_map).mean()
 
 
 def calculate_metric_percase(pred, gt):
